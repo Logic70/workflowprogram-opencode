@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.DS_Store
+
+package/.workflowprogram/package/
+package/.workflowprogram/runs/
+package/.workflowprogram/design/
+
+*.log
