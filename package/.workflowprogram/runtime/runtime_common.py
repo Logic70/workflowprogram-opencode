@@ -22,7 +22,22 @@ VALID_COMPLEXITY = {"S", "M", "L", "XL"}
 PACKAGE_COMMAND_PREFIX = "wp-"
 PACKAGE_PLUGIN_FILE = "workflowprogram.ts"
 PACKAGE_PLUGIN_ID = "workflowprogram-package-bridge"
-REQUIRED_PACKAGE_COMMANDS = ("wp-develop", "wp-validate")
+SUPPORTED_PACKAGE_INTENTS = ("develop", "validate", "preflight", "hotfix", "iterate", "ship")
+MUTATING_PACKAGE_INTENTS = ("develop", "hotfix", "iterate")
+READ_ONLY_PACKAGE_INTENTS = ("validate", "preflight", "ship")
+PACKAGE_UTILITY_COMMANDS = ("wp-doctor",)
+REQUIRED_PACKAGE_COMMANDS = tuple(f"{PACKAGE_COMMAND_PREFIX}{intent}" for intent in SUPPORTED_PACKAGE_INTENTS) + (
+    PACKAGE_UTILITY_COMMANDS
+)
+REQUIRED_PACKAGE_AGENTS = (
+    "workflow-designer",
+    "workflow-validator",
+    "workflow-verifier",
+    "logic-reviewer",
+    "security-reviewer",
+    "performance-reviewer",
+    "style-reviewer",
+)
 INSTALL_MANIFEST_PATH = ".workflowprogram/package/install-manifest.json"
 MANDATORY_DESIGN_FILES = (
     ".workflowprogram/design/workflow-spec.yaml",
@@ -45,6 +60,7 @@ class PackageLayout:
     package_root: Path
     config_path: Path
     commands_dir: Path
+    agents_dir: Path
     plugins_dir: Path
     runtime_root: Path
     validators_dir: Path
@@ -304,18 +320,22 @@ def detect_package_layout(package_root: Path) -> PackageLayout:
     validators_dir = runtime_root / "validators"
 
     local_commands = root / ".opencode" / "commands"
+    local_agents = root / ".opencode" / "agents"
     local_plugins = root / ".opencode" / "plugins"
     global_commands = root / "commands"
+    global_agents = root / "agents"
     global_plugins = root / "plugins"
 
-    if local_commands.exists() or local_plugins.exists():
+    if local_commands.exists() or local_agents.exists() or local_plugins.exists():
         commands_dir = local_commands
+        agents_dir = local_agents
         plugins_dir = local_plugins
         layout_kind = "project-local"
         if runtime_root == source_runtime:
             layout_kind = "source-package"
     else:
         commands_dir = global_commands
+        agents_dir = global_agents
         plugins_dir = global_plugins
         layout_kind = "global"
 
@@ -324,6 +344,7 @@ def detect_package_layout(package_root: Path) -> PackageLayout:
         package_root=root,
         config_path=config_path,
         commands_dir=commands_dir,
+        agents_dir=agents_dir,
         plugins_dir=plugins_dir,
         runtime_root=runtime_root,
         validators_dir=validators_dir,

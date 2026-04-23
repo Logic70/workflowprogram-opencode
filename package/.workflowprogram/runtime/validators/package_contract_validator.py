@@ -18,6 +18,7 @@ from runtime_common import (  # noqa: E402
     INSTALL_MANIFEST_PATH,
     PACKAGE_COMMAND_PREFIX,
     PACKAGE_PLUGIN_ID,
+    REQUIRED_PACKAGE_AGENTS,
     REQUIRED_PACKAGE_COMMANDS,
     detect_package_layout,
 )
@@ -49,6 +50,7 @@ def validate_package_contract(package_root: Path) -> dict[str, Any]:
     layout = detect_package_layout(root)
     opencode_json = layout.config_path
     commands_dir = layout.commands_dir
+    agents_dir = layout.agents_dir
     plugins_dir = layout.plugins_dir
     plugin_file = layout.plugin_file
     runtime_dir = layout.runtime_root
@@ -166,6 +168,26 @@ def validate_package_contract(package_root: Path) -> dict[str, Any]:
                 f"other_plugin_conflicts={other_plugin_conflicts}"
             ),
             "namespace_conflict",
+        )
+    )
+
+    checks.append(
+        _build_check(
+            "PKG-12",
+            agents_dir.is_dir(),
+            f"agents_dir={agents_dir}",
+            "package_structure",
+        )
+    )
+    agent_files = sorted(agents_dir.glob("*.md")) if agents_dir.is_dir() else []
+    agent_stems = {path.stem for path in agent_files}
+    missing_agents = sorted(set(REQUIRED_PACKAGE_AGENTS) - agent_stems)
+    checks.append(
+        _build_check(
+            "PKG-13",
+            not missing_agents,
+            f"required_agents={list(REQUIRED_PACKAGE_AGENTS)} missing_agents={missing_agents}",
+            "package_contract",
         )
     )
 

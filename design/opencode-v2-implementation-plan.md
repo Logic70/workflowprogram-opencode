@@ -219,13 +219,13 @@ v1 实施目标如下：
 1. 建立 package load smoke
 2. 建立 `/wp-develop` smoke
 3. 建立 generate/apply smoke
-4. 在有条件时建立 target load smoke
+4. 在有条件时建立 host integration smoke
 5. 无真实 OpenCode 环境时保留 `ENVIRONMENT-SKIP`
 
 验收：
 
 - `SMK-01 ~ SMK-04` 至少 PASS
-- 真实环境可用时 `SMK-06` PASS
+- 真实环境可用时 `SMK-06` 至少达到 package command/plugin 可发现
 
 ## 5. 任务优先级
 
@@ -249,7 +249,7 @@ v1 实施目标如下：
 ### 后置项
 
 - target plugin 复杂模式
-- target agents / skills 扩展
+- target host-visible agents / skills 扩展
 - packager / release 流程
 
 ## 6. 文件级实施清单

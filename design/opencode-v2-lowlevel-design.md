@@ -108,7 +108,7 @@ graph LR
 #### 设计思路
 
 - `WP_PACKAGE_ROOT` 作为 WorkflowProgram 产品包根目录。
-- OpenCode 启动后自动扫描 `.opencode/commands/*.md` 和 `.opencode/plugins/*.ts`。
+- OpenCode 启动后自动扫描 `.opencode/commands/*.md`、`.opencode/agents/*.md` 和 `.opencode/plugins/*.ts`。
 - package validator 在本地或 CI 中检查产品包契约完整性。
 - 加载结果不应依赖 `workflow-spec.yaml`。
 
@@ -118,6 +118,7 @@ graph LR
 |---|---|
 | `PackageManifest` | package 根目录及关键文件集合 |
 | `PackageCommand` | 产品命令定义 |
+| `PackageAgent` | 产品 agent 定义 |
 | `PackagePlugin` | 产品插件定义 |
 | `PackageCompatibility` | package 对宿主能力的兼容描述 |
 
@@ -128,9 +129,11 @@ sequenceDiagram
     participant Host as OpenCode Host
     participant Root as WP_PACKAGE_ROOT
     participant Cmd as Package Commands
+    participant Agent as Package Agents
     participant Plug as Package Plugin
     Host->>Root: 扫描 package root
     Host->>Cmd: 发现 /wp-* commands
+    Host->>Agent: 发现 package agents
     Host->>Plug: 发现 workflowprogram.ts
     Host-->>Root: 注册产品能力
 ```
@@ -257,11 +260,12 @@ sequenceDiagram
 #### 设计思路
 
 - 目标工作流被宿主加载，属于 target bundle contract。
-- target commands、target skills、target agents、target plugin 均由目标 `workflow-spec.yaml` 决定是否生成。
+- v1 当前由目标 `workflow-spec.yaml` 控制的 host-visible 交付物只有 target commands 与 target plugins。
 - v1 默认至少交付：
   - target `.workflowprogram/design/*`
   - target `.workflowprogram/runtime/*`
 - target `.opencode/commands/*`、`.opencode/plugins/*` 是否交付，取决于具体目标工作流模式。
+- target agents / skills 仍保留为后续扩展，不属于当前实现范围。
 
 ### UC-07 产品包安装部署
 #### 设计思路

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import sys
 from dataclasses import asdict, dataclass
@@ -14,6 +15,7 @@ from runtime_common import (
     FAILURE_KINDS,
     MANDATORY_DESIGN_FILES,
     MANDATORY_RUNTIME_FILES,
+    MANDATORY_TARGET_FILES,
     STAGE_SLOTS,
     DevelopRequest,
     aggregate_verdicts,
@@ -24,6 +26,9 @@ from runtime_common import (
     make_run_id,
     parse_user_arguments,
     read_json,
+    read_yaml,
+    registry_commands as spec_registry_commands,
+    registry_plugins as spec_registry_plugins,
     write_json,
     write_text,
     write_yaml,
@@ -36,6 +41,7 @@ if str(VALIDATORS_DIR) not in sys.path:
     sys.path.insert(0, str(VALIDATORS_DIR))
 
 from workflow_spec_validator import validate_workflow_spec  # type: ignore  # noqa: E402
+from package_contract_validator import validate_package_contract  # type: ignore  # noqa: E402
 
 
 @dataclass
@@ -193,7 +199,222 @@ def _bootstrap_run(run: RunContext) -> None:
     _append_event(run, "RunStarted", "S0", "running", "WorkflowProgram run started")
 
 
-def _build_workflow_spec(run: RunContext, request: DevelopRequest) -> dict[str, Any]:
+def _placeholder_layer(validator: str, verdict: str, summary: str) -> dict[str, Any]:
+    return {
+        "validator": validator,
+        "verdict": verdict,
+        "summary": summary,
+        "checks": [],
+        "exit_code": 0 if verdict != "FAIL" else 1,
+    }
+
+
+def _collect_existing_assets(target_root: Path) -> dict[str, Any]:
+    existing_opencode = sorted(
+        path.relative_to(target_root).as_posix()
+        for path in target_root.glob(".opencode/**/*")
+        if path.is_file()
+    )
+    existing_workflowprogram = sorted(
+        path.relative_to(target_root).as_posix()
+        for path in target_root.glob(".workflowprogram/**/*")
+        if path.is_file()
+    )
+    present_required = [path for path in MANDATORY_TARGET_FILES if (target_root / path).is_file()]
+    missing_required = [path for path in MANDATORY_TARGET_FILES if not (target_root / path).is_file()]
+    return {
+        "existing_opencode": existing_opencode,
+        "existing_workflowprogram": existing_workflowprogram,
+        "present_required_target_files": present_required,
+        "missing_required_target_files": missing_required,
+        "existing_workflow_spec": (target_root / ".workflowprogram" / "design" / "workflow-spec.yaml").is_file(),
+    }
+
+
+def _load_existing_spec(target_root: Path) -> dict[str, Any] | None:
+    spec_path = target_root / ".workflowprogram" / "design" / "workflow-spec.yaml"
+    if not spec_path.is_file():
+        return None
+    payload = read_yaml(spec_path)
+    return payload if isinstance(payload, dict) else None
+
+
+def _latest_prior_run(target_root: Path, current_run_root: Path) -> dict[str, Any] | None:
+    runs_root = target_root / ".workflowprogram" / "runs"
+    if not runs_root.is_dir():
+        return None
+    candidates = [path for path in runs_root.iterdir() if path.is_dir() and path != current_run_root]
+    for candidate in sorted(candidates, key=lambda item: item.name, reverse=True):
+        state_path = candidate / "state.json"
+        if not state_path.is_file():
+            continue
+        state = read_json(state_path)
+        validation_path = candidate / "validation-summary.json"
+        validation = read_json(validation_path) if validation_path.is_file() else {}
+        return {
+            "run_id": candidate.name,
+            "run_root": str(candidate),
+            "verdict": state.get("verdict"),
+            "status": state.get("status"),
+            "message": state.get("message"),
+            "validation_verdict": validation.get("verdict"),
+        }
+    return None
+
+
+def _inherit_existing_identity(request: DevelopRequest, spec: dict[str, Any]) -> dict[str, Any]:
+    inherited: dict[str, Any] = {}
+
+    meta = spec.get("meta", {})
+    if isinstance(meta, dict):
+        existing_name = str(meta.get("name", "")).strip()
+        if existing_name:
+            request.spec_name = existing_name
+            inherited["spec_name"] = existing_name
+
+    existing_commands = spec_registry_commands(spec)
+    if existing_commands and not request.emit_target_command:
+        existing_command_name = str(existing_commands[0].get("name", "")).strip()
+        if existing_command_name:
+            request.emit_target_command = True
+            request.target_command_name = existing_command_name
+            inherited["target_command_name"] = existing_command_name
+
+    existing_plugins = spec_registry_plugins(spec)
+    if existing_plugins and not request.emit_target_plugin:
+        existing_plugin_file = str(existing_plugins[0].get("file", "")).strip()
+        existing_plugin_id = str(existing_plugins[0].get("plugin_id", "")).strip()
+        if existing_plugin_file:
+            request.emit_target_plugin = True
+            request.target_plugin_file = existing_plugin_file.split("/")[-1]
+            inherited["target_plugin_file"] = request.target_plugin_file
+        if existing_plugin_id:
+            request.target_plugin_id = existing_plugin_id
+            inherited["target_plugin_id"] = existing_plugin_id
+
+    return inherited
+
+
+def _write_clarification_package(
+    run: RunContext,
+    request: DevelopRequest,
+    latest_run: dict[str, Any] | None,
+) -> dict[str, str]:
+    clarification_root = Path(run.run_root) / "outputs" / "clarification"
+    ensure_dir(clarification_root)
+
+    clarification_record = {
+        "intent": run.intent,
+        "target_root": run.target.target_root,
+        "request_summary": request.summary,
+        "raw_user_arguments": request.raw,
+        "normalized_spec_name": request.spec_name,
+        "complexity": request.complexity,
+        "latest_prior_run": latest_run,
+        "generated_at": iso_now(),
+    }
+    open_questions = {
+        "blocking": [],
+        "non_blocking": [],
+        "summary": "No explicit clarification round was required for this direct command invocation.",
+    }
+    readiness_report = {
+        "ready": True,
+        "clarification_mode": "direct-command",
+        "blocking_open_questions": 0,
+        "readback_confirmed": False,
+        "reason": "Explicit package command invocation produced a normalized develop request.",
+    }
+    assumption_log = "\n".join(
+        [
+            "# Assumption Log",
+            "",
+            "- The direct `/wp-develop` invocation is treated as an explicit intent selection.",
+            "- No additional clarification questions were required for this run.",
+            "",
+        ]
+    )
+
+    clarification_record_path = clarification_root / "clarification-record.json"
+    open_questions_path = clarification_root / "open-questions.json"
+    readiness_report_path = clarification_root / "design-readiness-report.json"
+    assumption_log_path = clarification_root / "assumption-log.md"
+    write_json(clarification_record_path, clarification_record)
+    write_json(open_questions_path, open_questions)
+    write_json(readiness_report_path, readiness_report)
+    write_text(assumption_log_path, assumption_log)
+
+    return {
+        "clarification_record": str(clarification_record_path),
+        "open_questions": str(open_questions_path),
+        "design_readiness_report": str(readiness_report_path),
+        "assumption_log": str(assumption_log_path),
+    }
+
+
+def _load_clarification_package(artifact_paths: dict[str, str]) -> dict[str, Any]:
+    clarification_record = read_json(Path(artifact_paths["clarification_record"]))
+    open_questions = read_json(Path(artifact_paths["open_questions"]))
+    design_readiness = read_json(Path(artifact_paths["design_readiness_report"]))
+    assumption_log = Path(artifact_paths["assumption_log"]).read_text(encoding="utf-8")
+    return {
+        "clarification_record": clarification_record,
+        "open_questions": open_questions,
+        "design_readiness_report": design_readiness,
+        "assumption_log": assumption_log,
+    }
+
+
+def _load_runtime_module(script_name: str, module_name: str):
+    script_path = Path(__file__).resolve().parent / script_name
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load runtime module from {script_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _write_diagnostic_artifacts(run: RunContext, package_root: Path, target_root: Path) -> dict[str, str]:
+    diagnostics_root = Path(run.run_root) / "outputs" / "diagnostics"
+    ensure_dir(diagnostics_root)
+
+    discover_module = _load_runtime_module("discover-host-capabilities.py", "workflowprogram_discover_host_capabilities")
+    probe_module = _load_runtime_module("probe-host-capabilities.py", "workflowprogram_probe_host_capabilities")
+    doctor_module = _load_runtime_module("doctor.py", "workflowprogram_doctor")
+    remediation_module = _load_runtime_module(
+        "generate-environment-remediation.py",
+        "workflowprogram_generate_environment_remediation",
+    )
+
+    capabilities = discover_module.discover_capabilities(package_root, target_root)
+    probe = probe_module.probe_capabilities(package_root, target_root)
+    doctor = doctor_module.run_doctor(package_root, target_root)
+    remediation = remediation_module.remediation_markdown(doctor)
+
+    capabilities_path = diagnostics_root / "host-capabilities.json"
+    probe_path = diagnostics_root / "capability-probe.json"
+    doctor_path = diagnostics_root / "doctor-report.json"
+    remediation_path = diagnostics_root / "environment-remediation.md"
+    write_json(capabilities_path, capabilities)
+    write_json(probe_path, probe)
+    write_json(doctor_path, doctor)
+    write_text(remediation_path, remediation)
+
+    return {
+        "host_capabilities": str(capabilities_path),
+        "capability_probe": str(probe_path),
+        "doctor_report": str(doctor_path),
+        "environment_remediation": str(remediation_path),
+    }
+
+
+def _build_workflow_spec(
+    run: RunContext,
+    request: DevelopRequest,
+    clarification_package: dict[str, Any] | None,
+) -> dict[str, Any]:
     required_outputs = list(MANDATORY_DESIGN_FILES + MANDATORY_RUNTIME_FILES)
     required_outputs.append(".workflowprogram/managed-files.json")
 
@@ -243,6 +464,18 @@ def _build_workflow_spec(run: RunContext, request: DevelopRequest) -> dict[str, 
             "source_design": "workflowprogram-opencode-v2",
             "complexity": request.complexity,
             "request_summary": request.summary,
+            "clarification": (
+                {
+                    "mode": clarification_package["design_readiness_report"].get("clarification_mode"),
+                    "ready": clarification_package["design_readiness_report"].get("ready"),
+                    "blocking_open_questions": clarification_package["design_readiness_report"].get(
+                        "blocking_open_questions"
+                    ),
+                    "summary": clarification_package["open_questions"].get("summary"),
+                }
+                if clarification_package
+                else None
+            ),
         },
         "stages": [
             {"id": "clarify", "stage_slot": "S1", "name": "Requirement Clarification", "pattern": "Explore"},
@@ -257,13 +490,25 @@ def _build_workflow_spec(run: RunContext, request: DevelopRequest) -> dict[str, 
                 "required_stage_slots": list(STAGE_SLOTS),
                 "optional_stage_slots": [],
             },
+            "preflight": {
+                "required_stage_slots": ["S2", "S5"],
+                "optional_stage_slots": ["S6"],
+            },
+            "hotfix": {
+                "required_stage_slots": ["S2", "S3", "S4", "S5"],
+                "optional_stage_slots": ["S6"],
+            },
             "validate": {
                 "required_stage_slots": ["S5"],
                 "optional_stage_slots": ["S6"],
             },
             "iterate": {
-                "required_stage_slots": ["S6"],
-                "optional_stage_slots": ["S5"],
+                "required_stage_slots": ["S2", "S3", "S4", "S5", "S6"],
+                "optional_stage_slots": [],
+            },
+            "ship": {
+                "required_stage_slots": ["S5", "S6"],
+                "optional_stage_slots": [],
             },
             "audit": {
                 "required_stage_slots": ["S5"],
@@ -298,6 +543,10 @@ def _build_workflow_spec(run: RunContext, request: DevelopRequest) -> dict[str, 
                 "context.json",
                 "state.json",
                 "events.jsonl",
+                "outputs/diagnostics/host-capabilities.json",
+                "outputs/diagnostics/capability-probe.json",
+                "outputs/diagnostics/doctor-report.json",
+                "outputs/diagnostics/environment-remediation.md",
                 "outputs/progress/current-progress.json",
                 "outputs/progress/milestones.jsonl",
                 "outputs/progress/user-progress.md",
@@ -506,9 +755,7 @@ python3 ".workflowprogram/runtime/workflow-entry.py" --target-root "$PWD"
 def _target_plugin_source(plugin_id: str, spec_name: str) -> str:
     return f"""const TARGET_PLUGIN_ID = "{plugin_id}"
 
-export {{ TARGET_PLUGIN_ID }}
-
-export default async function targetWorkflowPlugin(context) {{
+export const TargetWorkflowPlugin = async (context) => {{
   return {{
     "tool.execute.after": async (input, output) => {{
       if (input?.tool !== "bash") {{
@@ -582,43 +829,155 @@ def _set_terminal_state(run: RunContext, verdict: str, failure_kind: str | None,
     )
 
 
-def run_develop(package_root: Path, target_root: Path, user_arguments: str) -> dict[str, Any]:
-    run = _build_contexts(package_root, target_root, "develop", user_arguments)
+def _load_s5_judge_module():
+    judge_path = Path(__file__).resolve().parent / "workflow-s5-judge.py"
+    spec = importlib.util.spec_from_file_location("workflow_s5_judge_runtime", judge_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load S5 judge module from {judge_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _run_s5_judge(run_root: Path, validation_summary: dict[str, Any]) -> dict[str, Any]:
+    judge_module = _load_s5_judge_module()
+    return judge_module.judge_run(run_root, validation_summary)
+
+
+def _write_validation_artifacts(run_root: Path, summary: dict[str, Any]) -> None:
+    write_json(run_root / "validation-summary.json", summary)
+    lines = [
+        "# Validation Summary",
+        "",
+        f"- Overall verdict: `{summary['verdict']}`",
+        "",
+    ]
+    for key, layer in summary.get("layers", {}).items():
+        lines.extend(
+            [
+                f"## {key}",
+                "",
+                f"- Verdict: `{layer.get('verdict', 'WARN')}`",
+                f"- Summary: {layer.get('summary', 'n/a')}",
+                "",
+            ]
+        )
+    write_text(run_root / "validation-summary.md", "\n".join(lines).rstrip() + "\n")
+
+
+def _missing_target_result(run: RunContext, intent: str, message: str, existing_assets: dict[str, Any]) -> dict[str, Any]:
+    _set_terminal_state(
+        run,
+        "FAIL",
+        "implementation",
+        message,
+        existing_assets=existing_assets,
+    )
+    return {
+        "intent": intent,
+        "verdict": "FAIL",
+        "summary": message,
+        "run_root": run.run_root,
+        "existing_assets": existing_assets,
+        "exit_code": 1,
+    }
+
+
+def _run_mutation_intent(
+    intent: str,
+    package_root: Path,
+    target_root: Path,
+    user_arguments: str,
+    *,
+    require_existing_spec: bool,
+) -> dict[str, Any]:
+    run = _build_contexts(package_root, target_root, intent, user_arguments)
     _bootstrap_run(run)
 
-    request = parse_user_arguments(user_arguments, Path(run.target.target_root).name)
+    run_root = Path(run.run_root)
+    target_root_path = Path(run.target.target_root)
+    diagnostic_outputs = _write_diagnostic_artifacts(run, Path(run.package.package_root), target_root_path)
+    existing_spec = _load_existing_spec(target_root_path)
+    latest_run = _latest_prior_run(target_root_path, run_root)
+    request = parse_user_arguments(user_arguments, target_root_path.name)
+    inherited_identity: dict[str, Any] = {}
+    if require_existing_spec and existing_spec:
+        inherited_identity = _inherit_existing_identity(request, existing_spec)
+
+    request_messages = {
+        "develop": "Requirements normalized into a develop request.",
+        "hotfix": "Hotfix request normalized against the existing target workflow.",
+        "iterate": "Iterate request normalized using existing target workflow context.",
+    }
+    request_outputs: dict[str, Any] = {"summary": request.summary}
+    if inherited_identity:
+        request_outputs["inherited_identity"] = inherited_identity
+    if latest_run:
+        request_outputs["latest_prior_run"] = latest_run
+    clarification_package: dict[str, Any] | None = None
+    if intent == "develop":
+        clarification_paths = _write_clarification_package(run, request, latest_run)
+        clarification_package = _load_clarification_package(clarification_paths)
+        request_outputs["clarification_package"] = clarification_paths
+        request_outputs["clarification_consumed"] = {
+            "summary": clarification_package["open_questions"].get("summary"),
+            "ready": clarification_package["design_readiness_report"].get("ready"),
+            "blocking_open_questions": clarification_package["design_readiness_report"].get(
+                "blocking_open_questions"
+            ),
+        }
     _write_stage_summary(
         run,
         "S1",
         "clarify",
         "PASS",
-        "Requirements normalized into a develop request.",
-        outputs={"summary": request.summary},
+        request_messages[intent],
+        outputs=request_outputs,
     )
 
-    existing_assets = {
-        "existing_opencode": sorted(
-            path.relative_to(Path(run.target.target_root)).as_posix()
-            for path in Path(run.target.target_root).glob(".opencode/**/*")
-            if path.is_file()
-        ),
-        "existing_workflowprogram": sorted(
-            path.relative_to(Path(run.target.target_root)).as_posix()
-            for path in Path(run.target.target_root).glob(".workflowprogram/**/*")
-            if path.is_file()
-        ),
+    existing_assets = _collect_existing_assets(target_root_path)
+    if latest_run:
+        existing_assets["latest_prior_run"] = latest_run
+
+    if require_existing_spec and not existing_spec:
+        _write_stage_summary(
+            run,
+            "S2",
+            "context",
+            "FAIL",
+            "Existing target workflow is required for this intent.",
+            outputs=existing_assets,
+        )
+        return _missing_target_result(
+            run,
+            intent,
+            f"{intent.capitalize()} requires an existing generated target workflow.",
+            existing_assets,
+        )
+
+    context_messages = {
+        "develop": "Target root context scanned.",
+        "hotfix": "Existing target workflow context scanned for hotfix.",
+        "iterate": "Existing target workflow context scanned for iterate.",
     }
+    existing_assets["diagnostic_outputs"] = diagnostic_outputs
+    if clarification_package:
+        existing_assets["clarification_consumed"] = {
+            "summary": clarification_package["open_questions"].get("summary"),
+            "ready": clarification_package["design_readiness_report"].get("ready"),
+        }
     _write_stage_summary(
         run,
         "S2",
         "context",
         "PASS",
-        "Target root context scanned.",
+        context_messages[intent],
         outputs=existing_assets,
     )
 
-    spec = _build_workflow_spec(run, request)
-    run_root = Path(run.run_root)
+    spec = _build_workflow_spec(run, request, clarification_package)
+    spec["meta"]["source_intent"] = intent
     spec_path = run_root / "workflow-spec.yaml"
     view_path = run_root / "workflow-view.md"
     lowlevel_path = run_root / "workflow-lowlevel.md"
@@ -631,13 +990,24 @@ def run_develop(package_root: Path, target_root: Path, user_arguments: str) -> d
         "S3",
         "design",
         spec_validation["verdict"],
-        "Workflow spec generated and validated.",
-        outputs={"spec_path": str(spec_path), "spec_verdict": spec_validation["verdict"]},
+        f"Workflow spec generated and validated for `{intent}`.",
+        outputs={
+            "spec_path": str(spec_path),
+            "spec_verdict": spec_validation["verdict"],
+            "clarification_consumed": (
+                {
+                    "ready": clarification_package["design_readiness_report"].get("ready"),
+                    "summary": clarification_package["open_questions"].get("summary"),
+                }
+                if clarification_package
+                else None
+            ),
+        },
     )
     if spec_validation["exit_code"] != 0:
         _set_terminal_state(run, "FAIL", "design", "Workflow spec validation failed", spec_validation=spec_validation)
         return {
-            "intent": "develop",
+            "intent": intent,
             "verdict": "FAIL",
             "summary": "Workflow spec validation failed.",
             "run_root": run.run_root,
@@ -663,7 +1033,7 @@ def run_develop(package_root: Path, target_root: Path, user_arguments: str) -> d
         "S4",
         "generate",
         generate_status,
-        "Target bundle generated and managed apply executed.",
+        f"Target bundle generated and managed apply executed for `{intent}`.",
         outputs={
             "candidate_root": str(candidate_root),
             "managed_status": apply_result["status"],
@@ -679,7 +1049,7 @@ def run_develop(package_root: Path, target_root: Path, user_arguments: str) -> d
             managed_apply=apply_result,
         )
         return {
-            "intent": "develop",
+            "intent": intent,
             "verdict": "FAIL",
             "summary": "Managed apply detected conflicts.",
             "run_root": run.run_root,
@@ -690,7 +1060,7 @@ def run_develop(package_root: Path, target_root: Path, user_arguments: str) -> d
     write_json(
         run_root / "outputs" / "stages" / "runner-summary.json",
         {
-            "intent": "develop",
+            "intent": intent,
             "status": "pre-validation",
             "generated_target_root": run.target.target_root,
             "managed_apply_status": apply_result["status"],
@@ -702,19 +1072,23 @@ def run_develop(package_root: Path, target_root: Path, user_arguments: str) -> d
         target_root=Path(run.target.target_root),
         run_root=Path(run.run_root),
     )
+    judge_summary = _run_s5_judge(run_root, validation_summary)
     write_json(run_root / "outputs" / "stages" / "s5-validation-summary.json", validation_summary)
     _write_stage_summary(
         run,
         "S5",
         "validate",
-        validation_summary["verdict"],
-        "Layered validation completed.",
-        outputs={"validation_path": str(run_root / "validation-summary.json")},
+        judge_summary["verdict"],
+        f"Layered validation completed for `{intent}`.",
+        outputs={
+            "validation_path": str(run_root / "validation-summary.json"),
+            "judge_report_path": str(run_root / "validation-runtime-report.md"),
+        },
     )
 
     lessons_payload = {
         "new_constraints": [],
-        "notes": "No automatic rule updates are emitted in v1.",
+        "notes": f"No automatic rule updates are emitted for `{intent}` in v1.",
     }
     write_json(run_root / "outputs" / "stages" / "s6-lessons-summary.json", lessons_payload)
     _write_stage_summary(
@@ -729,39 +1103,80 @@ def run_develop(package_root: Path, target_root: Path, user_arguments: str) -> d
     write_json(
         run_root / "outputs" / "stages" / "runner-summary.json",
         {
-            "intent": "develop",
+            "intent": intent,
             "status": "completed",
             "generated_target_root": run.target.target_root,
             "managed_apply_status": apply_result["status"],
             "validation_verdict": validation_summary["verdict"],
+            "judge_verdict": judge_summary["verdict"],
         },
     )
 
-    final_verdict = aggregate_verdicts([validation_summary["verdict"]])
-    failure_kind = None if final_verdict != "FAIL" else "implementation"
+    final_verdict = judge_summary["verdict"]
+    failure_kind = judge_summary.get("failure_kind")
     _set_terminal_state(
         run,
         final_verdict,
         failure_kind,
-        "Develop pipeline completed.",
+        f"{intent.capitalize()} pipeline completed.",
         managed_apply=apply_result,
+        diagnostics=diagnostic_outputs,
         validation=validation_summary,
+        judge=judge_summary,
     )
+    summary_by_intent = {
+        "develop": "Target workflow bundle generated and applied.",
+        "hotfix": "Existing target workflow updated through the managed hotfix flow.",
+        "iterate": "Existing target workflow iterated and reapplied.",
+    }
     return {
-        "intent": "develop",
+        "intent": intent,
         "verdict": final_verdict,
-        "summary": "Target workflow bundle generated and applied.",
+        "summary": summary_by_intent[intent],
         "run_root": run.run_root,
         "spec_path": str(Path(run.target.design_root) / "workflow-spec.yaml"),
         "managed_apply": apply_result,
+        "diagnostics": diagnostic_outputs,
         "validation": validation_summary,
+        "judge": judge_summary,
         "exit_code": 0 if final_verdict != "FAIL" else 1,
     }
+
+
+def run_develop(package_root: Path, target_root: Path, user_arguments: str) -> dict[str, Any]:
+    return _run_mutation_intent(
+        "develop",
+        package_root,
+        target_root,
+        user_arguments,
+        require_existing_spec=False,
+    )
+
+
+def run_hotfix(package_root: Path, target_root: Path, user_arguments: str) -> dict[str, Any]:
+    return _run_mutation_intent(
+        "hotfix",
+        package_root,
+        target_root,
+        user_arguments,
+        require_existing_spec=True,
+    )
+
+
+def run_iterate(package_root: Path, target_root: Path, user_arguments: str) -> dict[str, Any]:
+    return _run_mutation_intent(
+        "iterate",
+        package_root,
+        target_root,
+        user_arguments,
+        require_existing_spec=True,
+    )
 
 
 def run_validate(package_root: Path, target_root: Path, user_arguments: str) -> dict[str, Any]:
     run = _build_contexts(package_root, target_root, "validate", user_arguments)
     _bootstrap_run(run)
+    diagnostic_outputs = _write_diagnostic_artifacts(run, Path(run.package.package_root), Path(run.target.target_root))
 
     write_json(
         Path(run.run_root) / "outputs" / "stages" / "runner-summary.json",
@@ -777,13 +1192,14 @@ def run_validate(package_root: Path, target_root: Path, user_arguments: str) -> 
         "validate",
         "PASS",
         "Validation pipeline entered.",
-        outputs={"target_root": run.target.target_root},
+        outputs={"target_root": run.target.target_root, "diagnostic_outputs": diagnostic_outputs},
     )
     validation_summary = run_validation_layers(
         package_root=Path(run.package.package_root),
         target_root=Path(run.target.target_root),
         run_root=Path(run.run_root),
     )
+    judge_summary = _run_s5_judge(Path(run.run_root), validation_summary)
     write_json(Path(run.run_root) / "outputs" / "stages" / "s5-validation-summary.json", validation_summary)
     write_json(
         Path(run.run_root) / "outputs" / "stages" / "runner-summary.json",
@@ -792,21 +1208,246 @@ def run_validate(package_root: Path, target_root: Path, user_arguments: str) -> 
             "status": "completed",
             "target_root": run.target.target_root,
             "validation_verdict": validation_summary["verdict"],
+            "judge_verdict": judge_summary["verdict"],
         },
     )
 
     _set_terminal_state(
         run,
-        validation_summary["verdict"],
-        None if validation_summary["verdict"] != "FAIL" else "implementation",
+        judge_summary["verdict"],
+        judge_summary.get("failure_kind"),
         "Validate pipeline completed.",
+        diagnostics=diagnostic_outputs,
         validation=validation_summary,
+        judge=judge_summary,
     )
     return {
         "intent": "validate",
-        "verdict": validation_summary["verdict"],
+        "verdict": judge_summary["verdict"],
         "summary": "Layered validation completed.",
         "run_root": run.run_root,
+        "diagnostics": diagnostic_outputs,
         "validation": validation_summary,
-        "exit_code": 0 if validation_summary["verdict"] != "FAIL" else 1,
+        "judge": judge_summary,
+        "exit_code": 0 if judge_summary["verdict"] != "FAIL" else 1,
     }
+
+
+def run_preflight(package_root: Path, target_root: Path, user_arguments: str) -> dict[str, Any]:
+    run = _build_contexts(package_root, target_root, "preflight", user_arguments)
+    _bootstrap_run(run)
+
+    target_root_path = Path(run.target.target_root)
+    run_root = Path(run.run_root)
+    diagnostic_outputs = _write_diagnostic_artifacts(run, Path(run.package.package_root), target_root_path)
+    latest_run = _latest_prior_run(target_root_path, run_root)
+    _write_stage_summary(
+        run,
+        "S1",
+        "preflight-request",
+        "PASS",
+        "Preflight request captured.",
+        outputs={"user_arguments": user_arguments, "latest_prior_run": latest_run, "diagnostic_outputs": diagnostic_outputs},
+    )
+
+    existing_assets = _collect_existing_assets(target_root_path)
+    if latest_run:
+        existing_assets["latest_prior_run"] = latest_run
+    existing_assets["diagnostic_outputs"] = diagnostic_outputs
+    context_verdict = "PASS" if existing_assets["existing_workflow_spec"] else "WARN"
+    context_message = (
+        "Existing generated target workflow detected."
+        if existing_assets["existing_workflow_spec"]
+        else "No generated target workflow detected yet; preflight ran against package readiness only."
+    )
+    _write_stage_summary(
+        run,
+        "S2",
+        "preflight-context",
+        context_verdict,
+        context_message,
+        outputs=existing_assets,
+    )
+
+    if existing_assets["existing_workflow_spec"]:
+        validation_summary = run_validation_layers(
+            package_root=Path(run.package.package_root),
+            target_root=target_root_path,
+            run_root=run_root,
+        )
+    else:
+        package_result = validate_package_contract(Path(run.package.package_root))
+        validation_summary = {
+            "verdict": "WARN" if package_result["verdict"] == "PASS" else "FAIL",
+            "layers": {
+                "package": package_result,
+                "spec": _placeholder_layer("workflow_spec_validator", "WARN", "No target workflow spec present yet."),
+                "target": _placeholder_layer("target_bundle_validator", "WARN", "No target bundle present yet."),
+                "run_state": _placeholder_layer("run_state_validator", "PASS", "Preflight run-state initialized."),
+            },
+            "exit_code": 0 if package_result["verdict"] == "PASS" else 1,
+        }
+        _write_validation_artifacts(run_root, validation_summary)
+
+    judge_summary = _run_s5_judge(run_root, validation_summary)
+    write_json(run_root / "outputs" / "stages" / "s5-validation-summary.json", validation_summary)
+    _write_stage_summary(
+        run,
+        "S5",
+        "preflight-validate",
+        judge_summary["verdict"],
+        "Preflight readiness checks completed.",
+        outputs={
+            "validation_path": str(run_root / "validation-summary.json"),
+            "judge_report_path": str(run_root / "validation-runtime-report.md"),
+        },
+    )
+    write_json(
+        run_root / "outputs" / "stages" / "runner-summary.json",
+        {
+            "intent": "preflight",
+            "status": "completed",
+            "target_root": run.target.target_root,
+            "validation_verdict": validation_summary["verdict"],
+            "judge_verdict": judge_summary["verdict"],
+        },
+    )
+
+    _set_terminal_state(
+        run,
+        judge_summary["verdict"],
+        judge_summary.get("failure_kind"),
+        "Preflight pipeline completed.",
+        diagnostics=diagnostic_outputs,
+        validation=validation_summary,
+        judge=judge_summary,
+    )
+    return {
+        "intent": "preflight",
+        "verdict": judge_summary["verdict"],
+        "summary": "Preflight readiness checks completed.",
+        "run_root": run.run_root,
+        "diagnostics": diagnostic_outputs,
+        "validation": validation_summary,
+        "judge": judge_summary,
+        "exit_code": 0 if judge_summary["verdict"] != "FAIL" else 1,
+    }
+
+
+def run_ship(package_root: Path, target_root: Path, user_arguments: str) -> dict[str, Any]:
+    run = _build_contexts(package_root, target_root, "ship", user_arguments)
+    _bootstrap_run(run)
+
+    target_root_path = Path(run.target.target_root)
+    run_root = Path(run.run_root)
+    diagnostic_outputs = _write_diagnostic_artifacts(run, Path(run.package.package_root), target_root_path)
+    latest_run = _latest_prior_run(target_root_path, run_root)
+    _write_stage_summary(
+        run,
+        "S1",
+        "ship-request",
+        "PASS",
+        "Ship request captured.",
+        outputs={"user_arguments": user_arguments, "latest_prior_run": latest_run, "diagnostic_outputs": diagnostic_outputs},
+    )
+
+    existing_assets = _collect_existing_assets(target_root_path)
+    if latest_run:
+        existing_assets["latest_prior_run"] = latest_run
+    existing_assets["diagnostic_outputs"] = diagnostic_outputs
+    if not existing_assets["existing_workflow_spec"]:
+        _write_stage_summary(
+            run,
+            "S2",
+            "ship-context",
+            "FAIL",
+            "Ship requires an existing generated target workflow.",
+            outputs=existing_assets,
+        )
+        return _missing_target_result(
+            run,
+            "ship",
+            "Ship requires an existing generated target workflow.",
+            existing_assets,
+        )
+
+    _write_stage_summary(
+        run,
+        "S2",
+        "ship-context",
+        "PASS",
+        "Existing generated target workflow detected for ship readiness.",
+        outputs=existing_assets,
+    )
+
+    validation_summary = run_validation_layers(
+        package_root=Path(run.package.package_root),
+        target_root=target_root_path,
+        run_root=run_root,
+    )
+    judge_summary = _run_s5_judge(run_root, validation_summary)
+    write_json(run_root / "outputs" / "stages" / "s5-validation-summary.json", validation_summary)
+    _write_stage_summary(
+        run,
+        "S5",
+        "ship-validate",
+        judge_summary["verdict"],
+        "Ship readiness validation completed.",
+        outputs={
+            "validation_path": str(run_root / "validation-summary.json"),
+            "judge_report_path": str(run_root / "validation-runtime-report.md"),
+        },
+    )
+
+    ship_verdict = "PASS" if judge_summary["verdict"] == "PASS" else "FAIL"
+    _write_stage_summary(
+        run,
+        "S6",
+        "ship-summary",
+        ship_verdict,
+        "Ship readiness confirmed." if ship_verdict == "PASS" else "Ship readiness blocked by validation findings.",
+        outputs={"validation_verdict": validation_summary["verdict"], "judge_verdict": judge_summary["verdict"]},
+    )
+    write_json(
+        run_root / "outputs" / "stages" / "runner-summary.json",
+        {
+            "intent": "ship",
+            "status": "completed" if ship_verdict == "PASS" else "blocked",
+            "target_root": run.target.target_root,
+            "validation_verdict": validation_summary["verdict"],
+            "judge_verdict": judge_summary["verdict"],
+        },
+    )
+    _set_terminal_state(
+        run,
+        ship_verdict,
+        None if ship_verdict == "PASS" else judge_summary.get("failure_kind"),
+        "Ship pipeline completed." if ship_verdict == "PASS" else "Ship pipeline blocked.",
+        diagnostics=diagnostic_outputs,
+        validation=validation_summary,
+        judge=judge_summary,
+    )
+    return {
+        "intent": "ship",
+        "verdict": ship_verdict,
+        "summary": "Ship readiness confirmed." if ship_verdict == "PASS" else "Ship readiness blocked.",
+        "run_root": run.run_root,
+        "diagnostics": diagnostic_outputs,
+        "validation": validation_summary,
+        "judge": judge_summary,
+        "exit_code": 0 if ship_verdict == "PASS" else 1,
+    }
+
+
+def run_intent(intent: str, package_root: Path, target_root: Path, user_arguments: str) -> dict[str, Any]:
+    handlers = {
+        "develop": run_develop,
+        "validate": run_validate,
+        "preflight": run_preflight,
+        "hotfix": run_hotfix,
+        "iterate": run_iterate,
+        "ship": run_ship,
+    }
+    if intent not in handlers:
+        raise ValueError(f"Unsupported intent: {intent}")
+    return handlers[intent](package_root, target_root, user_arguments)

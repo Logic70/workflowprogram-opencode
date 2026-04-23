@@ -5,9 +5,16 @@ WorkflowProgram 的 OpenCode 独立版本。
 这个仓库提供一套面向 OpenCode 的本地产品包，核心能力包括：
 
 - `/wp-develop`：为当前项目生成目标工作流
+- `/wp-doctor`：诊断 package、Python、OpenCode CLI 和当前项目就绪度
+- `/wp-preflight`：做 package 和目标工作流就绪度检查
+- `/wp-hotfix`：对已有目标工作流做受控热修
+- `/wp-iterate`：基于已有工作流和前次运行上下文做迭代
+- `/wp-ship`：确认已有目标工作流的交付就绪度
 - `/wp-validate`：对 package、spec、target bundle、run-state 做分层校验
+- package agent pack：`@workflow-designer`、`@workflow-validator`、`@workflow-verifier`、`@logic-reviewer`、`@security-reviewer`、`@performance-reviewer`、`@style-reviewer`
 - `project-local` / `global` 安装
 - 可选 package 专用 Python `venv`
+- runtime smoke 与真实 OpenCode host integration smoke
 
 它不是 ClaudeCode 版的兼容层，也不是从 Claude 版复制后简单替换路径的 adapter。这里的目标是维护一个 **OpenCode only** 的独立实现。
 
@@ -19,6 +26,7 @@ WorkflowProgram 的 OpenCode 独立版本。
 │   ├── opencode.json
 │   ├── .opencode/
 │   │   ├── commands/
+│   │   ├── agents/
 │   │   └── plugins/
 │   └── .workflowprogram/
 │       └── runtime/
@@ -89,13 +97,42 @@ python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py status --
 命令列表里应出现：
 
 - `/wp-develop`
+- `/wp-doctor`
+- `/wp-preflight`
+- `/wp-hotfix`
+- `/wp-iterate`
+- `/wp-ship`
 - `/wp-validate`
+
+可用 package agents：
+
+- `@workflow-designer`
+- `@workflow-validator`
+- `@workflow-verifier`
+- `@logic-reviewer`
+- `@security-reviewer`
+- `@performance-reviewer`
+- `@style-reviewer`
 
 典型流程：
 
 1. 执行 `/wp-develop <你的需求>`
-2. 查看生成的目标工作流和 run evidence
-3. 执行 `/wp-validate`
+2. 需要先诊断环境时执行 `/wp-doctor`
+3. 需要先检查就绪度时执行 `/wp-preflight`
+4. 对已有工作流修复或增量调整时执行 `/wp-hotfix` 或 `/wp-iterate`
+5. 准备最终确认时执行 `/wp-ship`
+6. 执行 `/wp-validate`
+
+## Doctor 常见结果
+
+- `DOC-04` 失败
+  - 说明当前 Python 环境缺少 `PyYAML`，优先重新安装并使用 `--create-venv`
+- `DOC-05` 失败
+  - 说明当前 shell 里没有可用的 `opencode` CLI，OpenCode 宿主集成无法验证
+- `DOC-06` 失败
+  - 说明当前项目目录不可写，`develop/hotfix/iterate` 这类写入型命令无法正常工作
+- `DOC-07` 失败
+  - 说明当前项目还没有生成目标工作流，先执行 `/wp-develop`
 
 ## 安装后的目录布局
 
@@ -106,6 +143,11 @@ python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py status --
 ├── .opencode/
 │   ├── commands/
 │   │   ├── wp-develop.md
+│   │   ├── wp-doctor.md
+│   │   ├── wp-preflight.md
+│   │   ├── wp-hotfix.md
+│   │   ├── wp-iterate.md
+│   │   ├── wp-ship.md
 │   │   └── wp-validate.md
 │   └── plugins/
 │       └── workflowprogram.ts
@@ -139,7 +181,30 @@ python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py status --
 - `install -> status -> develop -> validate -> uninstall`
 - `--create-venv` 下的 `PyYAML` 导入与 runtime 执行
 
-当前仓库内还没有真实 OpenCode 宿主的自动化集成测试，因为本地验证环境里没有可用的 `opencode` CLI / API。也就是说，安装脚本和 runtime 主链已验证，但命令是否被你的宿主正确发现，仍需要你在本机 OpenCode 环境中确认。
+当前仓库已经有真实 OpenCode 宿主的自动化集成 smoke，但它和 runtime smoke 的含义不同。runtime smoke 追求确定性闭环；host integration smoke 会真实调用 `opencode run --command ...`，因此在 provider/API 未就绪时允许返回 `ENVIRONMENT-SKIP`，而不是假装通过。
+当前已经补上两层 smoke：
+
+- `runtime smoke`
+  - 直接调用 Python runtime，验证 `install -> develop -> preflight -> hotfix -> iterate -> ship -> validate`
+- `host integration smoke`
+  - 真实调用 `opencode run --command ...`
+  - 检查 OpenCode CLI、package commands、package plugin、命令发现、以及运行时是否真正进入 bash/tool 阶段
+  - 在 provider/API 未就绪时允许返回 `ENVIRONMENT-SKIP`
+
+手工运行 host integration smoke：
+
+```bash
+python3 package/.workflowprogram/runtime/host-integration-smoke.py --package-root <installed-project-root> --target-root <installed-project-root> --timeout-seconds 15 --json
+```
+
+结果解释：
+
+- `PASS`
+  - 宿主加载、命令发现和运行链都通过
+- `ENVIRONMENT-SKIP`
+  - 宿主层至少已确认 CLI、package commands、package plugin 可见，但 provider/API 或执行阶段未在超时窗口内进入 runtime
+- `FAIL`
+  - 更偏向结构或集成问题，例如 commands/plugin 未被宿主发现
 
 ## 设计文档
 

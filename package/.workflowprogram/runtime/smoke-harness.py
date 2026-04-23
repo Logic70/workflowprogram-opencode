@@ -30,15 +30,47 @@ def main() -> int:
     package_root = Path(args.package_root).resolve()
     runtime_root = package_root / ".workflowprogram" / "runtime"
     runtime_entry = runtime_root / "workflow-entry.py"
+    runtime_host = runtime_root / "runtime_host.py"
+    host_integration_smoke = runtime_root / "host-integration-smoke.py"
+    provider_judge_regression = runtime_root / "provider-judge-regression.py"
     package_validator = runtime_root / "validators" / "package_contract_validator.py"
     deploy_script = runtime_root / "package-deploy.py"
 
-    with tempfile.TemporaryDirectory(prefix="workflowprogram-smoke-") as temp_dir:
+    temp_parent = Path("/tmp") if Path("/tmp").is_dir() else None
+    temp_dir = tempfile.mkdtemp(prefix="workflowprogram-smoke-", dir=str(temp_parent) if temp_parent else None)
+    try:
         install_root = Path(temp_dir) / "project"
         install_root.mkdir(parents=True, exist_ok=True)
 
         package_result = run_cmd(
             ["python3", str(package_validator), "--package-root", str(package_root), "--json"]
+        )
+        fixture_probe_result = run_cmd(
+            [
+                "python3",
+                str(runtime_host),
+                "probe",
+                "--provider",
+                "fixture_host",
+                "--json",
+            ]
+        )
+        opencode_probe_result = run_cmd(
+            [
+                "python3",
+                str(runtime_host),
+                "probe",
+                "--provider",
+                "opencode_native",
+                "--json",
+            ]
+        )
+        provider_judge_regression_result = run_cmd(
+            [
+                "python3",
+                str(provider_judge_regression),
+                "--json",
+            ]
         )
         install_result = run_cmd(
             [
@@ -60,6 +92,17 @@ def main() -> int:
         deployed_package_result = run_cmd(
             ["python3", str(deployed_package_validator), "--package-root", str(install_root), "--json"]
         )
+        doctor_result = run_cmd(
+            [
+                "python3",
+                str(deployed_runtime_root / "doctor.py"),
+                "--package-root",
+                str(install_root),
+                "--target-root",
+                str(install_root),
+                "--json",
+            ]
+        )
         develop_result = run_cmd(
             [
                 "python3",
@@ -71,6 +114,62 @@ def main() -> int:
                 str(install_root),
                 "--user-arguments",
                 "smoke target workflow --emit-target-command --emit-target-plugin",
+                "--json",
+            ]
+        )
+        preflight_result = run_cmd(
+            [
+                "python3",
+                str(deployed_runtime_entry),
+                "preflight",
+                "--package-root",
+                str(install_root),
+                "--target-root",
+                str(install_root),
+                "--user-arguments",
+                "smoke readiness check",
+                "--json",
+            ]
+        )
+        hotfix_result = run_cmd(
+            [
+                "python3",
+                str(deployed_runtime_entry),
+                "hotfix",
+                "--package-root",
+                str(install_root),
+                "--target-root",
+                str(install_root),
+                "--user-arguments",
+                "smoke hotfix update --emit-target-command --emit-target-plugin",
+                "--json",
+            ]
+        )
+        iterate_result = run_cmd(
+            [
+                "python3",
+                str(deployed_runtime_entry),
+                "iterate",
+                "--package-root",
+                str(install_root),
+                "--target-root",
+                str(install_root),
+                "--user-arguments",
+                "smoke iterate update --emit-target-command --emit-target-plugin",
+                "--json",
+            ]
+        )
+        ship_result = run_cmd(
+            [
+                "python3",
+                str(deployed_runtime_entry),
+                "ship",
+                "--package-root",
+                str(install_root),
+                "--target-root",
+                str(install_root),
+                "--user-arguments",
+                "smoke ship readiness",
                 "--json",
             ]
         )
@@ -86,13 +185,35 @@ def main() -> int:
                 "--json",
             ]
         )
+        host_integration_result = run_cmd(
+            [
+                "python3",
+                str(host_integration_smoke),
+                "--package-root",
+                str(install_root),
+                "--target-root",
+                str(install_root),
+                "--timeout-seconds",
+                "15",
+                "--json",
+            ]
+        )
 
         summary = {
             "package": package_result,
+            "runtime_host_fixture_probe": fixture_probe_result,
+            "runtime_host_opencode_probe": opencode_probe_result,
+            "provider_judge_regression": provider_judge_regression_result,
             "install": install_result,
             "deployed_package": deployed_package_result,
+            "doctor": doctor_result,
             "develop": develop_result,
+            "preflight": preflight_result,
+            "hotfix": hotfix_result,
+            "iterate": iterate_result,
+            "ship": ship_result,
             "validate": validate_result,
+            "host_integration": host_integration_result,
             "target_root": str(install_root),
             "target_files": sorted(
                 str(path.relative_to(install_root))
@@ -110,13 +231,22 @@ def main() -> int:
 
         ok = (
             package_result["exit_code"] == 0
+            and fixture_probe_result["exit_code"] == 0
+            and provider_judge_regression_result["exit_code"] == 0
             and install_result["exit_code"] == 0
             and deployed_package_result["exit_code"] == 0
+            and doctor_result["exit_code"] == 0
             and develop_result["exit_code"] == 0
+            and preflight_result["exit_code"] == 0
+            and hotfix_result["exit_code"] == 0
+            and iterate_result["exit_code"] == 0
+            and ship_result["exit_code"] == 0
             and validate_result["exit_code"] == 0
+            and host_integration_result["exit_code"] == 0
         )
-        shutil.rmtree(install_root, ignore_errors=True)
         return 0 if ok else 1
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

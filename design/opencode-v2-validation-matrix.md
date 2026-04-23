@@ -45,6 +45,8 @@
 | PKG-09 | runtime 根目录存在 | `source .workflowprogram/runtime/` 或 `deployed .workflowprogram/package/runtime/` | 主运行脚本目录必须存在 | package_structure |
 | PKG-10 | runtime validators 自包含 | `*/validators/` | 可部署 package 必须自包含 validator 脚本 | package_structure |
 | PKG-11 | package 与 target 标识隔离 | 命令名、插件文件名、插件逻辑标识 | 不得与 target 命名策略冲突 | namespace_conflict |
+| PKG-12 | package agents 目录存在 | `project-local .opencode/agents/` 或 `global agents/` | 已安装 package 的 agents 目录必须存在 | package_structure |
+| PKG-13 | package agents 完整 | 已安装 agents 目录中的 `*.md` | v1 必需 agent 集必须齐全 | package_contract |
 
 ## 4. Workflow Spec Validator 检查项
 
@@ -86,6 +88,10 @@
 | RUN-06 | failure_kind 合法 | `state.json` / report | failure_kind 必须在允许枚举内 | state_invalid |
 | RUN-07 | 证据链闭合 | state / events / report | run-id、intent、target_root 必须可互相对应 | evidence_inconsistent |
 | RUN-08 | 进展资产存在 | `outputs/progress/*` | 最小进展证据齐全 | evidence_missing |
+| RUN-09 | diagnostics 资产存在 | `outputs/diagnostics/*` | host capabilities、probe、doctor、remediation 必须齐全 | evidence_missing |
+| RUN-10 | diagnostics 内容合法 | diagnostics JSON/MD | diagnostics 必须包含最小字段集 | evidence_inconsistent |
+| RUN-11 | clarification 资产存在 | `outputs/clarification/*` | `develop` 运行必须落 clarification package | evidence_missing |
+| RUN-12 | clarification 内容合法 | clarification JSON/MD | clarification package 必须包含 record、questions、readiness、assumption log | evidence_inconsistent |
 
 ## 7. Smoke Harness 检查项
 
@@ -96,18 +102,18 @@
 | SMK-03 | generate smoke | 能生成 target candidate bundle | candidate 目录完整 |
 | SMK-04 | managed apply smoke | 能安全写入目标项目 | plan/result 正常，未静默覆盖 |
 | SMK-05 | validation smoke | 能输出多层校验摘要 | validation summary 存在 |
-| SMK-06 | target load smoke | 当 target bundle 含 host-visible OpenCode 资产时，目标工作流可被宿主加载 | target commands/plugin/runtime wrapper 可见 |
+| SMK-06 | host integration smoke | WorkflowProgram 产品包在真实 OpenCode 宿主中的最小可发现性成立 | package commands/plugin 至少可被宿主发现；若 provider/API 未就绪可返回 `ENVIRONMENT-SKIP` |
 
 ## 8. 需求到校验追踪矩阵
 
 | 需求 | 对应检查 |
 |---|---|
-| AR-01 产品包可加载 | PKG-01 ~ PKG-04, SMK-01 |
+| AR-01 产品包可加载 | PKG-01 ~ PKG-04, PKG-12 ~ PKG-13, SMK-01 |
 | AR-02 产品入口确定性 | PKG-05 ~ PKG-07, SMK-02 |
 | AR-03 契约分层清晰 | SPEC-08, TGT-06 |
 | AR-04 目标工作流可生成 | SPEC-06, TGT-01 ~ TGT-04, SMK-03 |
 | AR-05 写入受控 | TGT-04, SMK-04 |
-| AR-06 运行可回放 | RUN-01 ~ RUN-08 |
+| AR-06 运行可回放 | RUN-01 ~ RUN-12 |
 | AR-07 包插件可扩展 | PKG-04, PKG-08, SMK-01 |
 | AR-08 校验分层 | 全矩阵 |
 | AR-09 名称空间隔离 | PKG-11, SPEC-09, TGT-05, TGT-08 |

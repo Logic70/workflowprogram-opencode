@@ -34,6 +34,8 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
     events_path = resolved / "events.jsonl"
     progress_root = resolved / "outputs" / "progress"
     stages_root = resolved / "outputs" / "stages"
+    diagnostics_root = resolved / "outputs" / "diagnostics"
+    clarification_root = resolved / "outputs" / "clarification"
 
     checks.append(_check("RUN-01", context_path.is_file(), f"context={context_path}", "evidence_missing"))
     checks.append(_check("RUN-02", state_path.is_file(), f"state={state_path}", "evidence_missing"))
@@ -53,10 +55,15 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
     failure_kind_ok = False
     evidence_chain_ok = False
     progress_ok = False
+    diagnostics_ok = False
+    diagnostics_content_ok = False
+    clarification_ok = True
+    clarification_content_ok = True
     if context_path.is_file() and state_path.is_file() and events_path.is_file():
         context = read_json(context_path)
         state = read_json(state_path)
         events = read_jsonl(events_path)
+        intent = str(context.get("intent", "")).strip()
         verdict_ok = state.get("verdict") in {"PASS", "WARN", "FAIL", "ENVIRONMENT-SKIP"}
         failure_kind = state.get("failure_kind")
         failure_kind_ok = failure_kind in list(FAILURE_KINDS) + [None]
@@ -69,6 +76,53 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
         milestones = progress_root / "milestones.jsonl"
         user_progress = progress_root / "user-progress.md"
         progress_ok = current_progress.is_file() and milestones.is_file() and user_progress.is_file()
+
+        diagnostics_files = {
+            "host_capabilities": diagnostics_root / "host-capabilities.json",
+            "capability_probe": diagnostics_root / "capability-probe.json",
+            "doctor_report": diagnostics_root / "doctor-report.json",
+            "environment_remediation": diagnostics_root / "environment-remediation.md",
+        }
+        diagnostics_ok = all(path.is_file() for path in diagnostics_files.values())
+        if diagnostics_ok:
+            host_capabilities = read_json(diagnostics_files["host_capabilities"])
+            capability_probe = read_json(diagnostics_files["capability_probe"])
+            doctor_report = read_json(diagnostics_files["doctor_report"])
+            remediation_text = diagnostics_files["environment_remediation"].read_text(encoding="utf-8").strip()
+            diagnostics_content_ok = all(
+                (
+                    isinstance(host_capabilities.get("package_root"), str),
+                    isinstance(host_capabilities.get("runtime_root"), str),
+                    isinstance(capability_probe.get("probes"), list),
+                    capability_probe.get("verdict") in {"PASS", "FAIL"},
+                    isinstance(doctor_report.get("checks"), list),
+                    doctor_report.get("verdict") in {"PASS", "WARN", "FAIL"},
+                    remediation_text.startswith("# Environment Remediation"),
+                )
+            )
+
+        if intent == "develop":
+            clarification_files = {
+                "clarification_record": clarification_root / "clarification-record.json",
+                "open_questions": clarification_root / "open-questions.json",
+                "design_readiness_report": clarification_root / "design-readiness-report.json",
+                "assumption_log": clarification_root / "assumption-log.md",
+            }
+            clarification_ok = all(path.is_file() for path in clarification_files.values())
+            if clarification_ok:
+                clarification_record = read_json(clarification_files["clarification_record"])
+                open_questions = read_json(clarification_files["open_questions"])
+                design_readiness = read_json(clarification_files["design_readiness_report"])
+                assumption_log = clarification_files["assumption_log"].read_text(encoding="utf-8").strip()
+                clarification_content_ok = all(
+                    (
+                        clarification_record.get("intent") == "develop",
+                        isinstance(open_questions.get("blocking"), list),
+                        isinstance(open_questions.get("non_blocking"), list),
+                        design_readiness.get("ready") is True,
+                        assumption_log.startswith("# Assumption Log"),
+                    )
+                )
 
     checks.append(_check("RUN-05", verdict_ok, "state.verdict must be valid", "state_invalid"))
     checks.append(
@@ -86,6 +140,38 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
             progress_ok,
             f"required_progress_files={[str(progress_root / 'current-progress.json'), str(progress_root / 'milestones.jsonl'), str(progress_root / 'user-progress.md')]}",
             "evidence_missing",
+        )
+    )
+    checks.append(
+        _check(
+            "RUN-09",
+            diagnostics_ok,
+            f"diagnostics_root={diagnostics_root}",
+            "evidence_missing",
+        )
+    )
+    checks.append(
+        _check(
+            "RUN-10",
+            diagnostics_content_ok,
+            "diagnostic artifacts must contain package_root/runtime_root, probe list, doctor checks, and remediation markdown",
+            "evidence_inconsistent",
+        )
+    )
+    checks.append(
+        _check(
+            "RUN-11",
+            clarification_ok,
+            f"clarification_root={clarification_root}",
+            "evidence_missing",
+        )
+    )
+    checks.append(
+        _check(
+            "RUN-12",
+            clarification_content_ok,
+            "develop clarification package must include record, question lists, readiness report, and assumption log",
+            "evidence_inconsistent",
         )
     )
 

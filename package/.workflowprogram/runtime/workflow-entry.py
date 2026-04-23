@@ -14,6 +14,8 @@ RUNTIME_DIR = Path(__file__).resolve().parent
 if str(RUNTIME_DIR) not in sys.path:
     sys.path.insert(0, str(RUNTIME_DIR))
 
+from runtime_common import SUPPORTED_PACKAGE_INTENTS
+
 
 def _load_runner_module():
     runner_path = RUNTIME_DIR / "workflow-runner.py"
@@ -32,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "intent",
-        choices=("develop", "validate"),
+        choices=SUPPORTED_PACKAGE_INTENTS,
         help="WorkflowProgram product intent",
     )
     parser.add_argument(
@@ -63,18 +65,12 @@ def main() -> int:
     args = parser.parse_args()
     runner_module = _load_runner_module()
 
-    if args.intent == "develop":
-        result = runner_module.run_develop(
-            package_root=Path(args.package_root),
-            target_root=Path(args.target_root),
-            user_arguments=args.user_arguments,
-        )
-    else:
-        result = runner_module.run_validate(
-            package_root=Path(args.package_root),
-            target_root=Path(args.target_root),
-            user_arguments=args.user_arguments,
-        )
+    result = runner_module.run_intent(
+        intent=args.intent,
+        package_root=Path(args.package_root),
+        target_root=Path(args.target_root),
+        user_arguments=args.user_arguments,
+    )
 
     if args.json:
         json.dump(result, sys.stdout, indent=2, ensure_ascii=True)

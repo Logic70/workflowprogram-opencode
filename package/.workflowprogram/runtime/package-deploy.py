@@ -123,6 +123,14 @@ def _installed_command_paths(root: Path, mode: str, source_layout: Any) -> list[
     return files
 
 
+def _installed_agent_paths(root: Path, mode: str, source_layout: Any) -> list[tuple[Path, str]]:
+    agents_dir = (root / ".opencode" / "agents") if mode == "project-local" else (root / "agents")
+    files = []
+    for agent in sorted(source_layout.agents_dir.glob("*.md")):
+        files.append((agent, str((agents_dir / agent.name).relative_to(root).as_posix())))
+    return files
+
+
 def _runtime_destination_root(root: Path) -> Path:
     return root / ".workflowprogram" / "package" / "runtime"
 
@@ -150,6 +158,7 @@ def _assert_installable_target(source_root: Path, install_root: Path, mode: str)
 def _plan_install(source_root: Path, install_root: Path, mode: str) -> dict[str, Any]:
     source_layout = detect_package_layout(source_root)
     command_files = _installed_command_paths(install_root, mode, source_layout)
+    agent_files = _installed_agent_paths(install_root, mode, source_layout)
     runtime_dest_root = _runtime_destination_root(install_root)
 
     runtime_files: list[tuple[Path, str]] = []
@@ -164,6 +173,7 @@ def _plan_install(source_root: Path, install_root: Path, mode: str) -> dict[str,
         "install_root": install_root,
         "mode": mode,
         "command_files": command_files,
+        "agent_files": agent_files,
         "runtime_files": runtime_files,
         "plugin_file": (source_layout.plugin_file, str(plugin_destination.relative_to(install_root).as_posix())),
         "config_path": install_root / "opencode.json",
@@ -188,6 +198,7 @@ def _detect_unmanaged_conflicts(plan: dict[str, Any], force: bool, create_venv: 
 
     conflicts: list[str] = []
     all_targets = [relative for _, relative in plan["command_files"]]
+    all_targets.extend(relative for _, relative in plan["agent_files"])
     all_targets.append(plan["plugin_file"][1])
     all_targets.extend(relative for _, relative in plan["runtime_files"])
     if create_venv:
@@ -270,6 +281,11 @@ def install_package(
 
     installed_files: list[str] = []
     for source, relative in plan["command_files"]:
+        destination = install_root / relative
+        _copy_file(source, destination)
+        installed_files.append(relative)
+
+    for source, relative in plan["agent_files"]:
         destination = install_root / relative
         _copy_file(source, destination)
         installed_files.append(relative)
@@ -420,6 +436,7 @@ def uninstall_package(mode: str, target_root: str | None) -> dict[str, Any]:
     runtime_root = _runtime_destination_root(install_root)
     _prune_empty_dirs(runtime_root, install_root)
     _prune_empty_dirs((install_root / ".opencode" / "commands") if mode == "project-local" else (install_root / "commands"), install_root)
+    _prune_empty_dirs((install_root / ".opencode" / "agents") if mode == "project-local" else (install_root / "agents"), install_root)
     _prune_empty_dirs((install_root / ".opencode" / "plugins") if mode == "project-local" else (install_root / "plugins"), install_root)
 
     return {

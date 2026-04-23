@@ -67,7 +67,19 @@ python3 /mnt/d/Code/WorkflowProgram-CN/opencode-v2/package/.workflowprogram/runt
 - `install` 返回 `PASS` 或 `WARN`
 - `status` 返回可用布局
 - 当前项目中存在这些路径：
+  - `.opencode/agents/workflow-designer.md`
+  - `.opencode/agents/workflow-validator.md`
+  - `.opencode/agents/workflow-verifier.md`
+  - `.opencode/agents/logic-reviewer.md`
+  - `.opencode/agents/security-reviewer.md`
+  - `.opencode/agents/performance-reviewer.md`
+  - `.opencode/agents/style-reviewer.md`
   - `.opencode/commands/wp-develop.md`
+  - `.opencode/commands/wp-doctor.md`
+  - `.opencode/commands/wp-preflight.md`
+  - `.opencode/commands/wp-hotfix.md`
+  - `.opencode/commands/wp-iterate.md`
+  - `.opencode/commands/wp-ship.md`
   - `.opencode/commands/wp-validate.md`
   - `.opencode/plugins/workflowprogram.ts`
   - `.workflowprogram/package/runtime/workflow-entry.py`
@@ -78,7 +90,8 @@ python3 /mnt/d/Code/WorkflowProgram-CN/opencode-v2/package/.workflowprogram/runt
 安装成功后，告诉用户：
 
 - 重新打开当前项目的 OpenCode 会话，或者刷新命令列表
-- 然后检查 `/wp-develop` 和 `/wp-validate` 是否出现
+- 然后检查 `/wp-develop`、`/wp-doctor`、`/wp-preflight`、`/wp-hotfix`、`/wp-iterate`、`/wp-ship`、`/wp-validate` 是否出现
+- 如需使用 package agents，可检查 `@workflow-designer`、`@workflow-validator`、`@workflow-verifier` 等是否可见
 
 ## 故障处理
 

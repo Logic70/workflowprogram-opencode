@@ -92,7 +92,7 @@ graph LR
 
 | 接口名 | 提供者 | 使用者 | 协议/机制 | 功能描述 |
 |---|---|---|---|---|
-| Package Load Interface | OpenCode Host | WorkflowProgram 产品包 | 本地目录自动发现 | 加载 package commands 与 package plugin |
+| Package Load Interface | OpenCode Host | WorkflowProgram 产品包 | 本地目录自动发现 | 加载 package commands、package agents 与 package plugin |
 | Package Command Interface | WorkflowProgram 包 | 用户 | Markdown command | 提供 `/wp-develop`、`/wp-validate` 等产品入口 |
 | Package Plugin Interface | WorkflowProgram 包 | OpenCode Host | `.opencode/plugins/*.ts` | 注册 hook/custom tool |
 | Runtime Entry Interface | WorkflowProgram Runtime | Package Command | 本地脚本调用 | 承接产品命令后的确定性编排 |
@@ -109,8 +109,8 @@ sequenceDiagram
     participant Host as OpenCode Host
     participant Pkg as WorkflowProgram Package
     User->>Host: 启动 OpenCode
-    Host->>Pkg: 扫描 opencode.json / .opencode/commands / .opencode/plugins
-    Pkg-->>Host: 注册 commands 与 plugin
+    Host->>Pkg: 扫描 opencode.json / .opencode/commands / .opencode/agents / .opencode/plugins
+    Pkg-->>Host: 注册 commands、agents 与 plugin
     Host-->>User: WorkflowProgram 产品能力可用
 ```
 
@@ -141,7 +141,7 @@ sequenceDiagram
     participant Target as TARGET_ROOT
     participant GW as Generated Target Workflow
     Host->>Target: 扫描 .opencode/* 与 .workflowprogram/runtime/*
-    Target->>GW: 注册 target commands/agents/skills/plugins
+    Target->>GW: 注册 target runtime wrapper 与条件性 target commands/plugins
     GW-->>Host: 目标工作流可用
 ```
 
@@ -224,10 +224,12 @@ graph TB
 |---|---|
 | 真源根路径 | `WP_PACKAGE_ROOT` |
 | 真源命令目录 | `project-local`: `WP_PACKAGE_ROOT/.opencode/commands/`; `global`: `WP_PACKAGE_ROOT/commands/` |
+| 真源 agents 目录 | `project-local`: `WP_PACKAGE_ROOT/.opencode/agents/`; `global`: `WP_PACKAGE_ROOT/agents/` |
 | 真源插件目录 | `project-local`: `WP_PACKAGE_ROOT/.opencode/plugins/`; `global`: `WP_PACKAGE_ROOT/plugins/` |
 | 真源运行时目录 | `WP_PACKAGE_ROOT/.workflowprogram/package/runtime/` |
 | 部署源目录 | 仓库内 `package/.workflowprogram/runtime/` 作为安装源，不直接等同于已安装布局 |
 | 产品命令命名空间 | `/wp-*` |
+| 产品 agents 形态 | v1 必需，作为 package review/analysis 能力集随产品包交付 |
 | 产品插件职责 | hook/custom tool/bridge |
 | 产品命令定义位置 | 仅已安装 commands 目录中的 `wp-*.md` |
 | 非真源位置 | `opencode.json.command` 不承载 WorkflowProgram 产品命令真源 |
@@ -371,7 +373,7 @@ opencode-v2/
 │   ├── .opencode/
 │   │   ├── commands/
 │   │   ├── plugins/
-│   │   ├── agents/      # optional
+│   │   ├── agents/      # required in v1
 │   │   └── skills/      # optional
 │   └── .workflowprogram/
 │       └── runtime/
@@ -406,7 +408,7 @@ v1 采用 `source-as-deployment-source` 模式。
 
 安装规则：
 
-- 安装器只部署 WorkflowProgram 产品命令、产品插件和 package runtime。
+- 安装器部署 WorkflowProgram 产品命令、产品 agents、产品插件和 package runtime。
 - `project-local` 安装允许 package commands/plugins 与后续生成的 target commands/plugins 共存于同一项目根目录。
 - package runtime 固定落在 `.workflowprogram/package/runtime/`，用于与 target `.workflowprogram/runtime/` 做路径隔离。
 - package runtime 依赖通过 `.workflowprogram/package/runtime/requirements.txt` 声明；安装器可选创建 `.workflowprogram/package/.venv`，并在 install manifest 中记录 `python_executable`。

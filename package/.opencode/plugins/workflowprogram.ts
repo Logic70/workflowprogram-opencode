@@ -78,6 +78,46 @@ function detectPythonExecutable(packageRoot: string): string {
   return venvPythonPath(packageRoot) || DEFAULT_PYTHON
 }
 
+function hostSmokeDir(): string | null {
+  const raw = process.env.WORKFLOWPROGRAM_HOST_SMOKE_DIR || ""
+  if (!raw) {
+    return null
+  }
+  return path.resolve(raw)
+}
+
+function appendJsonl(pathname: string, payload: Record<string, unknown>): void {
+  fs.mkdirSync(path.dirname(pathname), { recursive: true })
+  fs.appendFileSync(pathname, `${JSON.stringify(payload)}\n`, "utf8")
+}
+
+function writeHostSmokeRecord(name: string, payload: Record<string, unknown>): void {
+  const directory = hostSmokeDir()
+  if (!directory) {
+    return
+  }
+  fs.mkdirSync(directory, { recursive: true })
+  fs.writeFileSync(path.join(directory, name), `${JSON.stringify(payload, null, 2)}\n`, "utf8")
+}
+
+function appendHostSmokeEvent(name: string, payload: Record<string, unknown>): void {
+  const directory = hostSmokeDir()
+  if (!directory) {
+    return
+  }
+  appendJsonl(path.join(directory, name), payload)
+}
+
+function safePayload(value: unknown): unknown {
+  try {
+    return JSON.parse(JSON.stringify(value))
+  } catch {
+    return {
+      preview: String(value),
+    }
+  }
+}
+
 function patchCommand(command: string, packageRoot: string, runtimeRoot: string, pythonExecutable: string): string {
   const normalizedPackageRoot = normalizePath(packageRoot)
   const normalizedRuntimeRoot = normalizePath(runtimeRoot)
@@ -91,16 +131,14 @@ function patchCommand(command: string, packageRoot: string, runtimeRoot: string,
     .replace(/\$WORKFLOWPROGRAM_PYTHON/g, normalizedPythonExecutable)
 }
 
-export { WORKFLOWPROGRAM_PACKAGE_PLUGIN_ID }
-
-export default async function workflowprogramPlugin(context: {
+export const WorkflowProgramPackageBridge = async (context: {
   client?: {
     app?: {
       log?: (payload: unknown) => Promise<void>
     }
   }
   directory: string
-}) {
+}) => {
   const pluginDirectory = resolvePluginDirectory()
   const packageRoot = path.resolve(
     process.env.WORKFLOWPROGRAM_PACKAGE_ROOT || derivePackageRoot(pluginDirectory, context.directory),
@@ -111,8 +149,37 @@ export default async function workflowprogramPlugin(context: {
   const pythonExecutable = normalizeExecutable(
     process.env.WORKFLOWPROGRAM_PYTHON || detectPythonExecutable(packageRoot),
   )
+  writeHostSmokeRecord("plugin-loaded.json", {
+    pluginId: WORKFLOWPROGRAM_PACKAGE_PLUGIN_ID,
+    packageRoot,
+    runtimeRoot,
+    pythonExecutable,
+    pid: process.pid,
+    timestamp: new Date().toISOString(),
+  })
 
   return {
+    event: async ({ event }: { event?: Record<string, unknown> }) => {
+      if (!event || typeof event.type !== "string") {
+        return
+      }
+      if (event.type === "command.executed") {
+        appendHostSmokeEvent("command-events.jsonl", {
+          type: event.type,
+          timestamp: new Date().toISOString(),
+          event: safePayload(event),
+        })
+        return
+      }
+      if (event.type === "session.created" || event.type === "session.error" || event.type === "session.status") {
+        appendHostSmokeEvent("session-events.jsonl", {
+          type: event.type,
+          timestamp: new Date().toISOString(),
+          event: safePayload(event),
+        })
+      }
+    },
+
     "tool.execute.before": async (input: any, output: any) => {
       if (input?.tool !== "bash") {
         return
@@ -122,6 +189,11 @@ export default async function workflowprogramPlugin(context: {
       }
 
       output.args.command = patchCommand(output.args.command, packageRoot, runtimeRoot, pythonExecutable)
+      appendHostSmokeEvent("runtime-before.jsonl", {
+        timestamp: new Date().toISOString(),
+        tool: input?.tool ?? null,
+        command: output.args.command,
+      })
     },
 
     "tool.execute.after": async (input: any, output: any) => {
@@ -137,6 +209,13 @@ export default async function workflowprogramPlugin(context: {
       ) {
         return
       }
+
+      appendHostSmokeEvent("runtime-after.jsonl", {
+        timestamp: new Date().toISOString(),
+        tool: input?.tool ?? null,
+        command,
+        exitCode: output?.exitCode ?? null,
+      })
 
       await context.client?.app?.log?.({
         body: {
