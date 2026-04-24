@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ClaudeCode 到 OpenCode 适配核心关注点</title>
+  <title>ClaudeCode 到 OpenCode 适配通用指南</title>
   <style>
     :root {
       --bg: #f6f1e8;
@@ -133,38 +133,119 @@
 <body>
   <main>
     <header>
-      <h1>ClaudeCode 到 OpenCode 适配核心关注点</h1>
+      <h1>ClaudeCode 到 OpenCode 适配通用指南</h1>
       <p class="lead">
-        本文总结 WorkflowProgram 从 ClaudeCode 元工作流迁移到 OpenCode 独立版本时的关键设计判断。
-        核心原则是：不做 ClaudeCode 目录结构兼容层，而是用 OpenCode 原生的 commands、agents、plugins、runtime 和项目本地安装模型重新落地同等产品能力。
+        本文提炼 ClaudeCode 生态能力迁移到 OpenCode 时的通用设计关注点。适配的重点不是逐文件复制
+        <code>.claude</code> 目录，也不是把一个宿主的术语机械映射到另一个宿主，而是先识别产品能力、宿主加载机制、
+        运行边界、交付形态和验证方式，再用 OpenCode 原生模型重新落地。
       </p>
-      <span class="tag">OpenCode only</span>
-      <span class="tag">Project-local materialization</span>
-      <span class="tag">Global bootstrap only</span>
-      <span class="tag">Layered contracts</span>
+      <span class="tag">Capability-first migration</span>
+      <span class="tag">Host-native loading</span>
+      <span class="tag">Isolation before convenience</span>
+      <span class="tag">Observable validation</span>
     </header>
 
-    <h2>一、核心关注点</h2>
+    <h2>一、先判断迁移对象</h2>
+    <p>
+      适配前应先回答“要迁移的到底是什么”。ClaudeCode 项目里常见的目录、命令、skill、hook、agent、脚本和文档并不一定都是产品能力，有些只是 ClaudeCode 宿主下的加载形式。
+      通用做法是先抽象能力，再选择 OpenCode 中对应的承载方式。
+    </p>
     <div class="grid">
       <section class="card">
-        <h3>加载边界</h3>
-        <p>必须区分 WorkflowProgram 自身如何被 OpenCode 加载，以及 WorkflowProgram 生成的目标工作流如何被 OpenCode 加载。前者是产品包契约，后者是目标 bundle 契约。</p>
+        <h3>产品能力</h3>
+        <p>用户真正需要的命令、流程、自动化判断、代码生成、审计、测试、发布等能力。迁移时应保持这些能力，而不是保持旧目录结构。</p>
       </section>
       <section class="card">
-        <h3>命名空间</h3>
-        <p><code>/wp-*</code> 归 WorkflowProgram 产品命令所有；目标工作流命令不能占用该命名空间，package plugin 和 target plugin 也不能复用逻辑标识。</p>
+        <h3>宿主加载形式</h3>
+        <p>ClaudeCode 的 command、skill、hook、settings 和 subagent 需要重新评估，分别落到 OpenCode 的 command、agent、plugin、config 或外部 runtime。</p>
       </section>
       <section class="card">
-        <h3>安装体验</h3>
-        <p>完整全局安装易用但污染风险高；纯项目安装隔离好但新项目体验差。最终采用全局轻量 bootstrap、用户级 cache、项目本地物化三层模型。</p>
+        <h3>运行控制面</h3>
+        <p>复杂流程不宜全部写进提示词或插件。稳定逻辑应进入脚本/runtime，宿主命令只做入口、参数转交和结果展示。</p>
       </section>
       <section class="card">
-        <h3>验证真实性</h3>
-        <p>runtime smoke 只能证明 Python 主链可运行；host smoke 才能证明 OpenCode 可发现命令和插件；target host smoke 才能证明生成物对宿主可见。</p>
+        <h3>交付对象</h3>
+        <p>要区分“适配包自身如何被 OpenCode 加载”和“适配包生成或修改的目标项目资产如何被 OpenCode 加载”。这两类契约不能混在同一个 schema 中。</p>
       </section>
     </div>
 
-    <h2>二、主要难点与解决方案</h2>
+    <h2>二、ClaudeCode 到 OpenCode 的常见映射</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ClaudeCode 侧概念</th>
+          <th>OpenCode 侧候选承载</th>
+          <th>适配判断</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Slash command / prompt command</td>
+          <td><code>.opencode/commands/*.md</code></td>
+          <td>适合保留为用户可见入口，但命令体应尽量薄，只调用确定性 runtime 或明确的 agent 流程。</td>
+        </tr>
+        <tr>
+          <td>Skill</td>
+          <td>OpenCode agent、command 文档、项目规则或 runtime 模块</td>
+          <td>不要默认迁移成同名 skill。先判断它是角色能力、操作步骤、知识库，还是可执行工具。</td>
+        </tr>
+        <tr>
+          <td>Hook</td>
+          <td><code>.opencode/plugins/*.ts</code></td>
+          <td>适合做事件监听、命令桥接、工具前后处理。不要把完整业务编排塞进 plugin hook。</td>
+        </tr>
+        <tr>
+          <td>Subagent / 单个 reviewer role</td>
+          <td><code>.opencode/agents/*.md</code></td>
+          <td>这里指 OpenCode 可加载、可被调用的单个执行角色。它是执行机制，不负责表达完整团队结构。</td>
+        </tr>
+        <tr>
+          <td>Agent team / 多角色协作流程</td>
+          <td>runtime team plan、orchestrator 配置或运行证据</td>
+          <td>这里指团队结构和阶段职责，例如谁负责设计、谁负责验证、如何 fan-out/fan-in。它不是 OpenCode 独立加载的 agent 文件。</td>
+        </tr>
+        <tr>
+          <td>Settings / permissions</td>
+          <td><code>opencode.json</code> + 项目安装 manifest</td>
+          <td>权限要最小化；全局设置只放通用 bootstrap 或用户明确接受的配置，项目行为应本地可复现。</td>
+        </tr>
+        <tr>
+          <td>工具脚本和 validator</td>
+          <td>项目内 runtime、包内 runtime 或外部 CLI</td>
+          <td>稳定逻辑应自包含交付，避免运行时偷偷依赖开发仓库路径。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>三、核心设计关注点</h2>
+    <div class="grid">
+      <section class="card">
+        <h3>加载边界</h3>
+        <p>明确哪些资产由 OpenCode 自动发现，哪些资产只是 runtime 内部实现。不要把内部实现字段写进用户项目的工作流 schema。</p>
+      </section>
+      <section class="card">
+        <h3>命名空间</h3>
+        <p>为产品命令、生成命令、插件 ID、agent 名称预留不同命名空间。冲突不是小问题，会直接导致用户运行错入口。</p>
+      </section>
+      <section class="card">
+        <h3>安装半径</h3>
+        <p>全局安装方便但污染范围大；项目本地安装隔离好但首次使用麻烦。常见折中是全局轻量 bootstrap + 项目本地物化。</p>
+      </section>
+      <section class="card">
+        <h3>依赖封装</h3>
+        <p>如果 runtime 依赖 Python、Node、第三方包或外部 CLI，应提供版本、锁定依赖、环境诊断和失败降级路径。</p>
+      </section>
+      <section class="card">
+        <h3>写入安全</h3>
+        <p>对目标项目的写入应先生成候选产物，再做 diff、冲突检测、确认、apply 和 rollback，而不是让 agent 直接改目标文件。</p>
+      </section>
+      <section class="card">
+        <h3>可观测验证</h3>
+        <p>区分静态文件存在、runtime 可执行、OpenCode 宿主可见、真实模型执行成功。不同层级的测试不能互相替代。</p>
+      </section>
+    </div>
+
+    <h2>四、主要难点与解决方案</h2>
     <table>
       <thead>
         <tr>
@@ -175,43 +256,43 @@
       </thead>
       <tbody>
         <tr>
-          <td>Claude skill、command、hook 与 OpenCode agent、command、plugin 不是一一映射</td>
-          <td>把 ClaudeCode 的加载模型错误复制到 OpenCode，导致 schema 和交付形态混乱</td>
-          <td>只迁移产品能力，不迁移 Claude 目录结构；OpenCode 版以 <code>.opencode/commands</code>、<code>.opencode/agents</code>、<code>.opencode/plugins</code> 为宿主真源。</td>
+          <td>两个宿主的概念不是一一映射</td>
+          <td>把旧宿主的加载模型复制到新宿主，导致交付形态混乱</td>
+          <td>采用 capability-first 迁移：先列产品能力，再选择 OpenCode 原生 command、agent、plugin、config 或 runtime 承载。</td>
         </tr>
         <tr>
-          <td>WorkflowProgram 产品包和目标工作流都可能生成 OpenCode 资产</td>
-          <td>产品包插件、目标插件、产品命令、目标命令互相覆盖</td>
-          <td>定义三根路径：<code>WP_PACKAGE_ROOT</code>、<code>TARGET_ROOT</code>、<code>RUN_ROOT</code>；目标命令禁止 <code>wp-*</code>；target plugin 禁止使用 package plugin 标识。</td>
+          <td>产品包自身和目标项目都可能包含 OpenCode 资产</td>
+          <td>产品命令、生成命令、package plugin、target plugin 互相覆盖</td>
+          <td>定义清晰根路径和命名空间。例如产品包根、目标项目根、运行证据根分别管理，生成资产不得占用产品命名空间。</td>
         </tr>
         <tr>
-          <td>OpenCode 可能读取全局配置、Claude 目录或 oh-my-opencode 资产</td>
-          <td>用户以为使用的是当前项目 WorkflowProgram，实际命令或 skill 来自其它路径</td>
-          <td><code>/wp-doctor</code> 增加 host source inventory、shadowing 检测、WSL/Windows 路径诊断和 reload guidance。</td>
+          <td>宿主会读取全局配置和第三方资产</td>
+          <td>用户以为运行的是当前项目能力，实际入口来自全局目录或其它工具包</td>
+          <td>提供 doctor/source inventory：列出 project、global、旧宿主目录、第三方包来源，并报告 shadowing 风险。</td>
         </tr>
         <tr>
-          <td>项目本地安装每个项目都要执行一次</td>
-          <td>用户体验不友好，安装命令难记</td>
-          <td>新增全局轻量 bootstrap：全局只安装 <code>/wp-install</code>、<code>/wp-status</code>、<code>/wp-upgrade</code>、<code>/wp-uninstall</code>，完整 package 仍物化到项目本地。</td>
+          <td>全局安装和项目安装的取舍困难</td>
+          <td>全局安装污染强，项目安装体验弱</td>
+          <td>将“部署器”全局化，将“完整能力”项目本地化。全局只提供 install/status/upgrade/uninstall 这类 bootstrap 入口。</td>
         </tr>
         <tr>
-          <td>Python 依赖可能缺失，尤其是 <code>PyYAML</code></td>
-          <td>安装器或 runtime 无法启动</td>
-          <td>声明 <code>requirements.txt</code> 和 <code>requirements.lock.txt</code>；项目安装可创建 <code>.workflowprogram/package/.venv</code>；bootstrap 可先预置 venv 再运行 package deploy。</td>
+          <td>runtime 依赖在用户环境中不可控</td>
+          <td>命令在开发机可用，在用户项目或 CI 中失败</td>
+          <td>声明依赖、锁定版本、提供专用 venv 或 bundle 策略，并在 doctor 中显式诊断解释器、依赖和路径问题。</td>
         </tr>
         <tr>
-          <td>真实 OpenCode 执行依赖 provider/API，可用性不稳定</td>
+          <td>真实 OpenCode 执行依赖 provider/API 和宿主状态</td>
           <td>测试假阳性或把环境问题误判为设计失败</td>
           <td>测试结果分为 <code>PASS</code>、<code>FAIL</code>、<code>ENVIRONMENT-SKIP</code>；无 API 时不声称真实宿主执行成功。</td>
         </tr>
       </tbody>
     </table>
 
-    <h2>三、最终架构取舍</h2>
+    <h2>五、推荐架构取舍</h2>
     <div class="callout">
       <p>
-        最终选择不是“完整全局安装”，也不是“每个项目都手动执行长命令”，而是：
-        <strong>全局轻量 bootstrap + 用户级版本化 package cache + 项目本地 materialized install</strong>。
+        通用建议是：<strong>全局只放低风险引导器，项目本地承载完整能力，runtime 负责确定性逻辑，OpenCode 原生命令和插件负责宿主接入。</strong>
+        这样可以同时控制用户体验、隔离性、可复现性和可验证性。
       </p>
     </div>
 
@@ -226,30 +307,52 @@
       <tbody>
         <tr>
           <td>完整全局安装</td>
-          <td>不采用</td>
-          <td>易造成命令污染、版本串扰、项目间不可复现和 Claude/OpenCode 资产混读。</td>
+          <td>谨慎采用</td>
+          <td>只适合极小、无项目状态、无写入目标文件的工具；复杂工作流容易造成命令污染和版本串扰。</td>
         </tr>
         <tr>
           <td>纯项目本地安装</td>
-          <td>保留为基础能力</td>
-          <td>隔离性最好，但新项目首次使用不够友好。</td>
+          <td>适合作为基础能力</td>
+          <td>隔离性和可复现性最好，但新项目首次使用不够友好。</td>
         </tr>
         <tr>
           <td>全局轻量 bootstrap</td>
-          <td>采用</td>
+          <td>推荐</td>
           <td>用户只需全局安装一次部署器；每个项目仍获得完整、可诊断、可回滚的本地安装。</td>
+        </tr>
+        <tr>
+          <td>外部 runtime 编排</td>
+          <td>推荐用于复杂流程</td>
+          <td>把确定性逻辑、状态机、validator、rollback、报告生成放到可测试 runtime 中，降低提示词漂移风险。</td>
         </tr>
       </tbody>
     </table>
 
-    <h2>四、验收口径</h2>
+    <h2>六、黑盒验收口径</h2>
     <ul>
-      <li>全局 bootstrap 只出现部署命令，不出现完整 <code>/wp-develop</code> 产品生命周期命令。</li>
-      <li>新项目执行 <code>/wp-install</code> 后，项目内出现完整 <code>.opencode/*</code> 和 <code>.workflowprogram/package/*</code>。</li>
-      <li>项目安装后重启 OpenCode，完整 <code>/wp-*</code> 命令和 package agents 可见。</li>
-      <li>runtime smoke、host integration smoke、target host smoke 和 bootstrap smoke 各自独立报告，不互相替代。</li>
-      <li>所有写入型 intent 都走 candidate、managed apply、lock 和 rollback manifest。</li>
+      <li>安装后，用户能在 OpenCode 中看到预期命令、agent 或插件行为。</li>
+      <li>新项目使用路径清晰：全局 bootstrap、项目本地安装、状态检查、升级、卸载都可独立执行。</li>
+      <li>同名命令、agent、skill、plugin 冲突能被诊断，并报告来源路径。</li>
+      <li>无网络、无 provider/API、缺少依赖、路径跨 WSL/Windows 时，系统能区分环境问题和实现问题。</li>
+      <li>写入型能力有候选产物、diff、冲突说明、apply 结果和 rollback 证据。</li>
+      <li>测试报告明确区分静态契约、runtime 执行、宿主加载、真实模型执行四个层级。</li>
     </ul>
+
+    <h2>七、WorkflowProgram 案例</h2>
+    <p>
+      WorkflowProgram 的 OpenCode 适配采用了上述通用原则。它没有复制 ClaudeCode 版的目录结构，而是把产品入口落到
+      <code>.opencode/commands/wp-*.md</code>，把角色能力落到 <code>.opencode/agents/*.md</code>，把 hook bridge 落到
+      <code>.opencode/plugins/workflowprogram.ts</code>，把确定性编排和 validator 放到 Python runtime。
+    </p>
+    <p>
+      安装模型上，WorkflowProgram 没有把完整能力全局安装，而是新增全局轻量 bootstrap：
+      <code>/wp-install</code>、<code>/wp-status</code>、<code>/wp-upgrade</code>、<code>/wp-uninstall</code>。
+      完整 <code>/wp-develop</code>、<code>/wp-validate</code>、agent pack、plugin 和 runtime 仍物化到每个目标项目中。
+    </p>
+    <p>
+      这个案例的特殊命名如 <code>WP_PACKAGE_ROOT</code>、<code>TARGET_ROOT</code>、<code>RUN_ROOT</code>、<code>/wp-*</code> 不是通用规定，
+      但背后的通用原则是：产品包根、目标项目根、运行证据根必须分离；产品命名空间和生成命名空间必须分离；全局便利性不能破坏项目隔离性。
+    </p>
   </main>
 </body>
 </html>
