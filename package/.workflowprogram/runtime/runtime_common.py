@@ -23,6 +23,8 @@ PACKAGE_COMMAND_PREFIX = "wp-"
 PACKAGE_PLUGIN_FILE = "workflowprogram.ts"
 PACKAGE_PLUGIN_ID = "workflowprogram-package-bridge"
 SCHEMA_VERSION = "opencode-v2.1"
+BOOTSTRAP_COMMANDS = ("wp-install", "wp-status", "wp-upgrade", "wp-uninstall")
+BOOTSTRAP_MANIFEST_PATH = ".workflowprogram/bootstrap/bootstrap-manifest.json"
 PRODUCT_INTENT_CONTRACT: dict[str, dict[str, Any]] = {
     "develop": {
         "command": "wp-develop",
@@ -361,6 +363,19 @@ def default_global_config_root() -> Path:
     if userprofile:
         return Path(userprofile) / ".config" / "opencode"
     return Path.home() / ".config" / "opencode"
+
+
+def default_bootstrap_cache_root() -> Path:
+    cache_dir = os.environ.get("WORKFLOWPROGRAM_OPENCODE_CACHE")
+    if cache_dir:
+        return Path(cache_dir)
+    xdg_cache = os.environ.get("XDG_CACHE_HOME")
+    if xdg_cache:
+        return Path(xdg_cache) / "workflowprogram-opencode"
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        return Path(local_app_data) / "workflowprogram-opencode" / "cache"
+    return Path.home() / ".cache" / "workflowprogram-opencode"
 
 
 def infer_package_root_from_runtime_dir(runtime_dir: Path) -> Path:

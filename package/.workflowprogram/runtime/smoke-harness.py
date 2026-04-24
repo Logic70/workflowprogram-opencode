@@ -41,6 +41,10 @@ def main() -> int:
     try:
         install_root = Path(temp_dir) / "project"
         install_root.mkdir(parents=True, exist_ok=True)
+        bootstrap_global_root = Path(temp_dir) / "global-opencode"
+        bootstrap_cache_root = Path(temp_dir) / "cache"
+        bootstrap_project_root = Path(temp_dir) / "bootstrap-project"
+        bootstrap_project_root.mkdir(parents=True, exist_ok=True)
 
         package_result = run_cmd(
             ["python3", str(package_validator), "--package-root", str(package_root), "--json"]
@@ -109,6 +113,57 @@ def main() -> int:
                 "project-local",
                 "--target-root",
                 str(install_root),
+                "--json",
+            ]
+        )
+        install_bootstrap_result = run_cmd(
+            [
+                "python3",
+                str(deploy_script),
+                "install-bootstrap",
+                "--source-package-root",
+                str(package_root),
+                "--target-root",
+                str(bootstrap_global_root),
+                "--cache-root",
+                str(bootstrap_cache_root),
+                "--version",
+                "smoke",
+                "--json",
+            ]
+        )
+        bootstrap_status_result = run_cmd(
+            [
+                "python3",
+                str(deploy_script),
+                "bootstrap-status",
+                "--target-root",
+                str(bootstrap_global_root),
+                "--json",
+            ]
+        )
+        bootstrap_runtime = bootstrap_global_root / ".workflowprogram" / "bootstrap" / "bootstrap-runtime.py"
+        bootstrap_project_install_result = run_cmd(
+            [
+                "python3",
+                str(bootstrap_runtime),
+                "--global-root",
+                str(bootstrap_global_root),
+                "install",
+                "--target-root",
+                str(bootstrap_project_root),
+                "--json",
+            ]
+        )
+        bootstrap_project_status_result = run_cmd(
+            [
+                "python3",
+                str(bootstrap_runtime),
+                "--global-root",
+                str(bootstrap_global_root),
+                "status",
+                "--target-root",
+                str(bootstrap_project_root),
                 "--json",
             ]
         )
@@ -286,6 +341,10 @@ def main() -> int:
             "install": install_result,
             "status": status_result,
             "reinstall": reinstall_result,
+            "install_bootstrap": install_bootstrap_result,
+            "bootstrap_status": bootstrap_status_result,
+            "bootstrap_project_install": bootstrap_project_install_result,
+            "bootstrap_project_status": bootstrap_project_status_result,
             "deployed_package": deployed_package_result,
             "doctor": doctor_result,
             "develop": develop_result,
@@ -321,6 +380,10 @@ def main() -> int:
             and install_result["exit_code"] == 0
             and status_result["exit_code"] == 0
             and reinstall_result["exit_code"] == 0
+            and install_bootstrap_result["exit_code"] == 0
+            and bootstrap_status_result["exit_code"] == 0
+            and bootstrap_project_install_result["exit_code"] == 0
+            and bootstrap_project_status_result["exit_code"] == 0
             and deployed_package_result["exit_code"] == 0
             and doctor_result["exit_code"] == 0
             and develop_result["exit_code"] == 0

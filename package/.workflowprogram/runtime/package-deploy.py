@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -17,11 +18,14 @@ if str(RUNTIME_DIR) not in sys.path:
     sys.path.insert(0, str(RUNTIME_DIR))
 
 from runtime_common import (  # noqa: E402
+    BOOTSTRAP_COMMANDS,
+    BOOTSTRAP_MANIFEST_PATH,
     INSTALL_MANIFEST_PATH,
     PACKAGE_COMMAND_PREFIX,
     PACKAGE_PLUGIN_FILE,
     REQUIRED_PACKAGE_COMMANDS,
     SCHEMA_VERSION,
+    default_bootstrap_cache_root,
     default_global_config_root,
     detect_package_layout,
     ensure_dir,
@@ -36,6 +40,26 @@ BACKUP_CONFIG_PATH = ".workflowprogram/package/opencode.json.backup"
 VENV_RELATIVE_PATH = ".workflowprogram/package/.venv"
 REQUIREMENTS_FILE = "requirements.txt"
 REQUIREMENTS_LOCK_FILE = "requirements.lock.txt"
+BOOTSTRAP_RUNTIME_RELATIVE = ".workflowprogram/bootstrap/bootstrap-runtime.py"
+BOOTSTRAP_COMMAND_DIR = "commands"
+BOOTSTRAP_CACHE_EXCLUDED_PARTS = {
+    "__pycache__",
+    ".pytest_cache",
+    "node_modules",
+    "runs",
+}
+BOOTSTRAP_CACHE_EXCLUDED_NAMES = {
+    "package-lock.json",
+    "package.json",
+    ".package-lock.json",
+    "bun.lock",
+}
+BOOTSTRAP_CACHE_EXCLUDED_SUFFIXES = {
+    ".log",
+    ".pyc",
+    ".pyd",
+    ".pyo",
+}
 
 
 def _read_json_file(path: Path) -> dict[str, Any]:
@@ -45,6 +69,48 @@ def _read_json_file(path: Path) -> dict[str, Any]:
 def _write_text_file(path: Path, content: str) -> None:
     ensure_dir(path.parent)
     path.write_text(content, encoding="utf-8", newline="\n")
+
+
+def _bootstrap_command_body(action: str) -> str:
+    script = "${OPENCODE_CONFIG_DIR:-$HOME/.config/opencode}/.workflowprogram/bootstrap/bootstrap-runtime.py"
+    descriptions = {
+        "install": "Install WorkflowProgram into the current project from the global bootstrap cache",
+        "status": "Inspect WorkflowProgram project-local installation status",
+        "upgrade": "Upgrade the current project's WorkflowProgram installation from the global bootstrap cache",
+        "uninstall": "Remove WorkflowProgram project-local installation from the current project",
+    }
+    extra = {
+        "install": "--create-venv --use-lock",
+        "status": "",
+        "upgrade": "--create-venv --use-lock --force",
+        "uninstall": "",
+    }[action]
+    suffix = f" {extra}" if extra else ""
+    return f"""---
+description: {descriptions[action]}
+---
+
+This is the lightweight WorkflowProgram global bootstrap command.
+
+Rules:
+- Treat the current working directory as the target project root.
+- Use the global bootstrap cache as the source package.
+- Do not edit project files directly from the command body.
+- Pass any extra user arguments through to the bootstrap runtime only when they are explicit CLI flags.
+
+Run this first:
+
+```bash
+python3 "{script}" {action} --target-root "$PWD"{suffix} --json
+```
+
+If `python3` is not available on this host, retry once with `python`.
+
+Then:
+- Report the bootstrap verdict and install/status/upgrade/uninstall summary.
+- If the command installs or upgrades the package, tell the user to restart OpenCode or reopen the project so local `/wp-*` commands refresh.
+- If the command fails, surface the JSON `error`, `stderr`, or failed check directly.
+"""
 
 
 def _copy_file(source: Path, destination: Path) -> None:
@@ -62,6 +128,76 @@ def _iter_runtime_files(runtime_root: Path) -> list[Path]:
             continue
         files.append(candidate)
     return files
+
+
+def _should_skip_cached_package_path(relative: Path) -> bool:
+    if any(part in BOOTSTRAP_CACHE_EXCLUDED_PARTS for part in relative.parts):
+        return True
+    if relative.name in BOOTSTRAP_CACHE_EXCLUDED_NAMES:
+        return True
+    if relative.suffix in BOOTSTRAP_CACHE_EXCLUDED_SUFFIXES:
+        return True
+    return False
+
+
+def _copy_package_to_cache(source_root: Path, cache_package_root: Path) -> dict[str, Any]:
+    if cache_package_root.exists():
+        shutil.rmtree(cache_package_root)
+    ensure_dir(cache_package_root)
+    included_files: list[str] = []
+    excluded_entries: list[str] = []
+    for current_root, dirnames, filenames in os.walk(source_root):
+        current = Path(current_root)
+        relative_current = current.relative_to(source_root)
+        kept_dirnames: list[str] = []
+        for dirname in sorted(dirnames):
+            relative_dir = relative_current / dirname
+            if _should_skip_cached_package_path(relative_dir):
+                excluded_entries.append(relative_dir.as_posix() + "/")
+                continue
+            kept_dirnames.append(dirname)
+            ensure_dir(cache_package_root / relative_dir)
+        dirnames[:] = kept_dirnames
+        for filename in sorted(filenames):
+            relative_file = relative_current / filename
+            if _should_skip_cached_package_path(relative_file):
+                excluded_entries.append(relative_file.as_posix())
+                continue
+            _copy_file(source_root / relative_file, cache_package_root / relative_file)
+            included_files.append(relative_file.as_posix())
+    return {
+        "cache_package_root": str(cache_package_root),
+        "included_files": included_files,
+        "excluded_entries": sorted(set(excluded_entries)),
+    }
+
+
+def _bootstrap_runtime_source(source_layout: Any) -> Path:
+    runtime = source_layout.runtime_root / "bootstrap-runtime.py"
+    if not runtime.is_file():
+        raise FileNotFoundError(f"bootstrap-runtime.py not found: {runtime}")
+    return runtime
+
+
+def _install_bootstrap_commands(global_root: Path) -> list[str]:
+    installed: list[str] = []
+    command_actions = {
+        "wp-install": "install",
+        "wp-status": "status",
+        "wp-upgrade": "upgrade",
+        "wp-uninstall": "uninstall",
+    }
+    commands_root = global_root / BOOTSTRAP_COMMAND_DIR
+    for command_name in BOOTSTRAP_COMMANDS:
+        action = command_actions[command_name]
+        relative = f"{BOOTSTRAP_COMMAND_DIR}/{command_name}.md"
+        _write_text_file(global_root / relative, _bootstrap_command_body(action))
+        installed.append(relative)
+    return installed
+
+
+def _bootstrap_manifest_path(global_root: Path) -> Path:
+    return global_root / BOOTSTRAP_MANIFEST_PATH
 
 
 def _deepcopy_json(payload: dict[str, Any]) -> dict[str, Any]:
@@ -498,6 +634,155 @@ def install_status(source_package_root: Path | None, mode: str, target_root: str
     }
 
 
+def install_bootstrap(
+    source_package_root: Path,
+    target_root: str | None,
+    cache_root: str | None,
+    version: str | None,
+    force: bool = False,
+) -> dict[str, Any]:
+    source_root = source_package_root.resolve()
+    source_layout = detect_package_layout(source_root)
+    global_root = _resolve_install_root("global", target_root)
+    bootstrap_manifest = _bootstrap_manifest_path(global_root)
+    if bootstrap_manifest.exists() and not force:
+        try:
+            existing = read_json(bootstrap_manifest)
+        except Exception:
+            existing = {}
+        installed_files = existing.get("installed_files", []) if isinstance(existing, dict) else []
+        unmanaged_conflicts = [
+            path
+            for path in installed_files
+            if path and (global_root / path).exists()
+        ]
+        if unmanaged_conflicts:
+            return {
+                "action": "install-bootstrap",
+                "verdict": "FAIL",
+                "summary": "Bootstrap is already installed; use --force to replace it.",
+                "global_root": str(global_root),
+                "existing_manifest": str(bootstrap_manifest),
+                "conflicts": unmanaged_conflicts,
+                "exit_code": 2,
+            }
+
+    selected_version = version or SCHEMA_VERSION
+    selected_cache_root = Path(cache_root).resolve() if cache_root else default_bootstrap_cache_root().resolve()
+    cache_package_root = selected_cache_root / "packages" / selected_version / "package"
+    ensure_dir(global_root)
+    cache_result = _copy_package_to_cache(source_root, cache_package_root)
+
+    installed_files: list[str] = []
+    installed_files.extend(_install_bootstrap_commands(global_root))
+    bootstrap_runtime_dest = global_root / BOOTSTRAP_RUNTIME_RELATIVE
+    _copy_file(_bootstrap_runtime_source(source_layout), bootstrap_runtime_dest)
+    installed_files.append(BOOTSTRAP_RUNTIME_RELATIVE)
+
+    manifest = {
+        "schema_version": SCHEMA_VERSION,
+        "installed_at": iso_now(),
+        "mode": "global-bootstrap",
+        "global_root": str(global_root),
+        "source_package_root": str(source_root),
+        "cache_root": str(selected_cache_root),
+        "cache_package_root": str(cache_package_root),
+        "bootstrap_version": selected_version,
+        "installed_files": sorted(installed_files),
+        "bootstrap_commands": list(BOOTSTRAP_COMMANDS),
+        "cache_result": cache_result,
+    }
+    write_json(bootstrap_manifest, manifest)
+    installed_files.append(str(bootstrap_manifest.relative_to(global_root).as_posix()))
+
+    return {
+        "action": "install-bootstrap",
+        "verdict": "PASS",
+        "summary": "WorkflowProgram global bootstrap installed.",
+        "global_root": str(global_root),
+        "cache_package_root": str(cache_package_root),
+        "bootstrap_runtime": str(bootstrap_runtime_dest),
+        "installed_files": sorted(installed_files),
+        "manifest_path": str(bootstrap_manifest),
+        "exit_code": 0,
+    }
+
+
+def bootstrap_status(target_root: str | None) -> dict[str, Any]:
+    global_root = _resolve_install_root("global", target_root)
+    manifest_path = _bootstrap_manifest_path(global_root)
+    manifest = None
+    if manifest_path.exists():
+        try:
+            manifest = read_json(manifest_path)
+        except Exception:
+            manifest = {"error": "manifest unreadable"}
+    command_status = {}
+    for command in BOOTSTRAP_COMMANDS:
+        command_status[command] = (global_root / BOOTSTRAP_COMMAND_DIR / f"{command}.md").is_file()
+    runtime_path = global_root / BOOTSTRAP_RUNTIME_RELATIVE
+    cache_package_root = None
+    cache_available = False
+    if isinstance(manifest, dict) and isinstance(manifest.get("cache_package_root"), str):
+        cache_package_root = manifest["cache_package_root"]
+        cache_available = (Path(cache_package_root) / ".workflowprogram" / "runtime" / "package-deploy.py").is_file()
+    verdict = "PASS" if runtime_path.is_file() and all(command_status.values()) and cache_available else "WARN"
+    return {
+        "action": "bootstrap-status",
+        "verdict": verdict,
+        "global_root": str(global_root),
+        "runtime_path": str(runtime_path),
+        "runtime_available": runtime_path.is_file(),
+        "commands": command_status,
+        "manifest": manifest,
+        "cache_package_root": cache_package_root,
+        "cache_available": cache_available,
+        "exit_code": 0,
+    }
+
+
+def uninstall_bootstrap(target_root: str | None, remove_cache: bool = False) -> dict[str, Any]:
+    global_root = _resolve_install_root("global", target_root)
+    manifest_path = _bootstrap_manifest_path(global_root)
+    if not manifest_path.exists():
+        return {
+            "action": "uninstall-bootstrap",
+            "verdict": "FAIL",
+            "summary": "Bootstrap manifest not found.",
+            "global_root": str(global_root),
+            "exit_code": 1,
+        }
+    manifest = read_json(manifest_path)
+    removed_files: list[str] = []
+    for relative in manifest.get("installed_files", []):
+        path = global_root / relative
+        if path.exists() and path.is_file():
+            path.unlink()
+            removed_files.append(relative)
+    if manifest_path.exists():
+        manifest_path.unlink()
+        removed_files.append(str(manifest_path.relative_to(global_root).as_posix()))
+    removed_cache = None
+    if remove_cache and isinstance(manifest.get("cache_package_root"), str):
+        cache_package_root = Path(manifest["cache_package_root"])
+        package_version_root = cache_package_root.parent
+        if package_version_root.exists():
+            shutil.rmtree(package_version_root, ignore_errors=True)
+            removed_cache = str(package_version_root)
+
+    _prune_empty_dirs(global_root / BOOTSTRAP_COMMAND_DIR, global_root)
+    _prune_empty_dirs(global_root / ".workflowprogram" / "bootstrap", global_root)
+    return {
+        "action": "uninstall-bootstrap",
+        "verdict": "PASS",
+        "summary": "WorkflowProgram global bootstrap uninstalled.",
+        "global_root": str(global_root),
+        "removed_files": removed_files,
+        "removed_cache": removed_cache,
+        "exit_code": 0,
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Install or uninstall WorkflowProgram package layouts")
     parser.add_argument("--json", action="store_true")
@@ -527,6 +812,26 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser.add_argument("--source-package-root", help="Optional source package root for context")
     status_parser.add_argument("--json", action="store_true")
 
+    bootstrap_install_parser = subparsers.add_parser("install-bootstrap", help="Install a lightweight global bootstrap into OpenCode config")
+    bootstrap_install_parser.add_argument(
+        "--source-package-root",
+        help="Source WorkflowProgram package root; defaults to the package containing this script",
+    )
+    bootstrap_install_parser.add_argument("--target-root", help="OpenCode global config root")
+    bootstrap_install_parser.add_argument("--cache-root", help="WorkflowProgram user cache root")
+    bootstrap_install_parser.add_argument("--version", help="Cache version directory; defaults to schema version")
+    bootstrap_install_parser.add_argument("--force", action="store_true", help="Replace an existing bootstrap install")
+    bootstrap_install_parser.add_argument("--json", action="store_true")
+
+    bootstrap_status_parser = subparsers.add_parser("bootstrap-status", help="Inspect global bootstrap install state")
+    bootstrap_status_parser.add_argument("--target-root", help="OpenCode global config root")
+    bootstrap_status_parser.add_argument("--json", action="store_true")
+
+    bootstrap_uninstall_parser = subparsers.add_parser("uninstall-bootstrap", help="Remove the global bootstrap install")
+    bootstrap_uninstall_parser.add_argument("--target-root", help="OpenCode global config root")
+    bootstrap_uninstall_parser.add_argument("--remove-cache", action="store_true")
+    bootstrap_uninstall_parser.add_argument("--json", action="store_true")
+
     return parser
 
 
@@ -547,9 +852,22 @@ def main() -> int:
         )
     elif args.action == "uninstall":
         result = uninstall_package(mode=args.mode, target_root=args.target_root)
-    else:
+    elif args.action == "status":
         source_root = Path(args.source_package_root).resolve() if args.source_package_root else None
         result = install_status(source_package_root=source_root, mode=args.mode, target_root=args.target_root)
+    elif args.action == "install-bootstrap":
+        source_root = Path(args.source_package_root).resolve() if args.source_package_root else default_source_root
+        result = install_bootstrap(
+            source_package_root=source_root,
+            target_root=args.target_root,
+            cache_root=args.cache_root,
+            version=args.version,
+            force=args.force,
+        )
+    elif args.action == "bootstrap-status":
+        result = bootstrap_status(target_root=args.target_root)
+    else:
+        result = uninstall_bootstrap(target_root=args.target_root, remove_cache=args.remove_cache)
 
     if args.json:
         json.dump(result, sys.stdout, indent=2, ensure_ascii=True)

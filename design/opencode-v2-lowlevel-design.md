@@ -44,6 +44,9 @@
 | FR-26 | Offline & Cross-Platform Install | 支持离线依赖、WSL/Windows 路径和重复安装/升级/卸载测试 |
 | FR-27 | Deep Validation | 补充 draft、lowlevel、generated runtime、lessons delta、clarification review 校验 |
 | FR-28 | Capability Parity Matrix | 维护 ClaudeCode 能力到 OpenCode 能力的可追踪映射 |
+| FR-29 | Global Bootstrap Installer | 提供全局轻量部署器，支持新项目一键 project-local 安装 |
+| FR-30 | User Package Cache | 提供用户级版本化 package cache，作为 bootstrap 安装源 |
+| FR-31 | Bootstrap Lifecycle Commands | 全局只暴露 install/status/upgrade/uninstall，不暴露完整产品生命周期命令 |
 
 ## 特性分析
 ### 使用场景分析
@@ -65,6 +68,7 @@
 | UC-13 契约升级 | spec/manifest 版本变化 | 自动迁移、拒绝迁移 | 读取版本、执行迁移、记录迁移报告 |
 | UC-14 写入恢复 | apply 中断或冲突 | 并发、只读、用户改动 | 加锁、生成冲突说明、回滚或恢复 |
 | UC-15 离线与跨平台安装 | 无网络或 WSL/Windows 混用 | dependency lock、路径转换 | 使用锁定依赖、规范化路径、提示 reload |
+| UC-16 新项目全局引导安装 | 用户在新项目打开 OpenCode | install、status、upgrade、uninstall | 全局 bootstrap 从用户 cache 安装完整 project-local package |
 
 ### 影响分析
 #### 依赖与技术限制
@@ -80,6 +84,8 @@
 - package plugin 与 target plugin 不得复用同名逻辑标识。
 - package 运行时与分层 validator 必须随 `WP_PACKAGE_ROOT` 一起交付，不能依赖仓库根路径中的额外脚本。
 - v1 不依赖 `dist/opencode/`，但需要安装脚本把 `package/` 物化成宿主可发现布局。
+- 为改善新项目使用体验，允许安装全局 bootstrap；但 bootstrap 不等同于完整 WorkflowProgram 全局安装。
+- 全局 bootstrap 默认写入 OpenCode global `commands/` 和 `.workflowprogram/bootstrap/`，完整 package 写入用户级 cache。
 
 #### 硬件限制
 
@@ -97,6 +103,8 @@
 | 纯 prompt/skill 驱动 | 灵活 | 不确定、难追踪、边界弱 | 不采用 |
 | command + runtime 脚本 | 控制清晰、易审计 | 需要维护脚本链 | 采用 |
 | command + plugin bridge + runtime | 兼顾 hook/tool 与控制面 | 需要明确边界 | v1 采用 |
+| full global install | 新项目零部署 | 命令污染、版本串扰、隔离弱 | 不采用 |
+| global bootstrap + project-local materialization | 新项目只需运行 `/wp-install`，同时保持隔离 | 需要维护 cache 和 bootstrap 版本 | 采用 |
 
 ## 特性/功能实现原理
 ### 总体方案
@@ -116,7 +124,7 @@ graph LR
 
 ### 特性功能设计
 
-建议拆成 6 个特性模块：
+建议拆成 8 个特性模块：
 
 | 模块 | 作用 | 所属契约层 |
 |---|---|---|
@@ -126,6 +134,8 @@ graph LR
 | F4 Workflow Semantics Build | 生成目标工作流语义 spec | 工作流语义契约 |
 | F5 Target Bundle Delivery | 生成并写入目标 bundle | 目标交付契约 |
 | F6 Evidence & Validation | 运行证据与分层校验 | 运行证据契约 |
+| F7 Global Bootstrap | 全局轻量部署入口 | 安装部署契约 |
+| F8 User Package Cache | 版本化 package 安装源 | 安装部署契约 |
 
 ### UC-01 产品包加载实现
 #### 设计思路
@@ -554,6 +564,44 @@ fan_in: required
 - 安装脚本必须明确当前 Python、pip、venv、路径风格和 OpenCode 命令来源。
 - WSL/Windows 混用时，manifest 同时记录原始路径和规范化路径；命令模板只使用当前宿主可执行路径。
 
+### UC-16 新项目全局引导安装实现
+
+#### 设计思路
+
+- `package-deploy.py install-bootstrap` 只向 OpenCode global config 写入 bootstrap command 和 bootstrap runtime。
+- 完整 package 被复制到用户级 cache，默认路径为 `~/.cache/workflowprogram-opencode/packages/<version>/package`。
+- 用户在新项目运行 `/wp-install` 时，全局 command 调用 `bootstrap-runtime.py install --target-root "$PWD"`。
+- `bootstrap-runtime.py` 从 bootstrap manifest 定位 cache package，再复用 `package-deploy.py install --mode project-local` 完成项目安装。
+- `/wp-status`、`/wp-upgrade`、`/wp-uninstall` 只操作当前项目的 project-local install manifest。
+
+#### 实体关系分析
+
+| 实体 | 说明 |
+|---|---|
+| `BootstrapManifest` | 全局 bootstrap 安装状态、cache 根、cache package 根和命令清单 |
+| `BootstrapCommand` | 全局轻量命令，只负责调用 bootstrap runtime |
+| `PackageCacheEntry` | 版本化完整 package copy |
+| `ProjectInstallManifest` | 项目本地安装真源，仍由 `package-deploy.py` 写入 |
+
+#### 时序分析
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Cmd as Global /wp-install
+    participant BR as bootstrap-runtime.py
+    participant Cache as Package Cache
+    participant Deploy as package-deploy.py
+    participant Target as TARGET_ROOT
+    User->>Cmd: /wp-install
+    Cmd->>BR: install --target-root $PWD
+    BR->>Cache: read cached package path
+    BR->>Deploy: install --mode project-local
+    Deploy->>Target: materialize .opencode and .workflowprogram/package
+    Deploy-->>BR: install result
+    BR-->>User: project-local install summary
+```
+
 ### 扩展 Story 划分
 
 | Story | 说明 | 依赖 |
@@ -578,3 +626,4 @@ fan_in: required
 | S28 | 补充 deep validators 与 clarification review | S8 |
 | S29 | 补充 golden fixtures 与 CI 回归入口 | S19-S28 |
 | S30 | 建立 capability parity matrix 并接入 docs | S11-S29 |
+| S31 | 实现 global bootstrap installer、cache、bootstrap runtime 与 smoke 覆盖 | S21-S30 |

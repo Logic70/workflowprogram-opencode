@@ -43,6 +43,7 @@ v1 实施目标如下：
 | IP-11 | target host reload 可验证 | 能区分 package host smoke 与 target host reload smoke |
 | IP-12 | release artifact 可复现 | 能生成干净 `dist/opencode/` 或 archive 并校验 manifest/checksum |
 | IP-13 | 契约硬化落地 | schema version、migration、error code、apply recovery、permission/privacy 策略进入 validator |
+| IP-14 | 新项目全局引导安装 | 全局只安装 bootstrap，完整 package 仍通过 project-local 物化到当前项目 |
 
 ## 3. 实施边界
 
@@ -478,6 +479,29 @@ v1 实施目标如下：
 
 - `/wp-validate` 或 `/wp-audit` 可选择执行 deep validation
 - CI 没有真实 OpenCode host 时只 skip host-dependent checks，不标记 PASS
+
+### P14 全局轻量 bootstrap 安装器
+
+目标：
+
+- 改善新项目首次使用体验，避免用户每个项目手写长安装命令。
+- 避免完整 WorkflowProgram 全局安装带来的命令污染和版本串扰。
+
+任务：
+
+1. 新增 `bootstrap-runtime.py`
+2. 扩展 `package-deploy.py install-bootstrap`
+3. 扩展 `package-deploy.py bootstrap-status`
+4. 扩展 `package-deploy.py uninstall-bootstrap`
+5. 写入全局 `/wp-install`、`/wp-status`、`/wp-upgrade`、`/wp-uninstall`
+6. 建立用户级版本化 package cache
+7. smoke 覆盖 bootstrap install -> project-local install -> project status
+
+验收：
+
+- 全局 bootstrap 不安装完整 lifecycle commands、agents 或 package plugin
+- 新项目通过 `/wp-install` 能获得完整 project-local package
+- bootstrap manifest 和 project install manifest 均可追踪
 
 ## 9. 工作量估算
 

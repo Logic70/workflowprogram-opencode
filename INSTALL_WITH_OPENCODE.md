@@ -2,6 +2,8 @@
 
 本文档给 OpenCode 自身读取并执行，用于把 WorkflowProgram 安装到当前项目。
 
+优先方案是先安装一次全局轻量 bootstrap，然后在每个新项目中执行 `/wp-install`。如果当前环境尚未安装 bootstrap，也可以直接执行本文后面的 project-local 安装命令。
+
 ## 适用范围
 
 - 当前工作目录就是目标项目根目录。
@@ -9,6 +11,7 @@
   - Windows: `D:\Code\WorkflowProgram-CN\opencode-v2\package`
   - WSL/Linux: `/mnt/d/Code/WorkflowProgram-CN/opencode-v2/package`
 - 目标是执行 `project-local` 安装。
+- 如果选择全局 bootstrap，目标是只把 `/wp-install`、`/wp-status`、`/wp-upgrade`、`/wp-uninstall` 安装到 OpenCode 全局配置，完整 WorkflowProgram 仍安装到当前项目。
 
 ## 执行原则
 
@@ -21,7 +24,41 @@
 
 ## 步骤
 
-### 1. 识别平台与解释器
+### 1. 可选：安装全局轻量 bootstrap
+
+如果用户希望以后每个新项目只运行 `/wp-install`，先执行一次全局 bootstrap 安装。
+
+Windows：
+
+```bash
+python D:\Code\WorkflowProgram-CN\opencode-v2\package\.workflowprogram\runtime\package-deploy.py install-bootstrap --source-package-root D:\Code\WorkflowProgram-CN\opencode-v2\package --force
+```
+
+bash / WSL / Linux：
+
+```bash
+python3 /mnt/d/Code/WorkflowProgram-CN/opencode-v2/package/.workflowprogram/runtime/package-deploy.py install-bootstrap --source-package-root /mnt/d/Code/WorkflowProgram-CN/opencode-v2/package --force
+```
+
+检查 bootstrap：
+
+```bash
+python3 /mnt/d/Code/WorkflowProgram-CN/opencode-v2/package/.workflowprogram/runtime/package-deploy.py bootstrap-status
+```
+
+安装后，在新项目中打开 OpenCode 并执行：
+
+```text
+/wp-install
+```
+
+注意：
+
+- 全局 bootstrap 不是完整 WorkflowProgram。
+- 全局只应出现 `/wp-install`、`/wp-status`、`/wp-upgrade`、`/wp-uninstall`。
+- `/wp-develop` 等完整产品命令只应在当前项目完成 project-local 安装后出现。
+
+### 2. 识别平台与解释器
 
 先判断当前 shell 环境：
 
@@ -33,7 +70,7 @@
 - 源包路径
 - 当前工作目录
 
-### 2. 执行安装
+### 3. 执行项目本地安装
 
 如果当前环境是 Windows，请执行：
 
@@ -47,7 +84,7 @@ python D:\Code\WorkflowProgram-CN\opencode-v2\package\.workflowprogram\runtime\p
 python3 /mnt/d/Code/WorkflowProgram-CN/opencode-v2/package/.workflowprogram/runtime/package-deploy.py install --mode project-local --create-venv --python python3 --source-package-root /mnt/d/Code/WorkflowProgram-CN/opencode-v2/package --target-root .
 ```
 
-### 3. 执行状态检查
+### 4. 执行状态检查
 
 如果当前环境是 Windows，请执行：
 
@@ -61,7 +98,7 @@ python D:\Code\WorkflowProgram-CN\opencode-v2\package\.workflowprogram\runtime\p
 python3 /mnt/d/Code/WorkflowProgram-CN/opencode-v2/package/.workflowprogram/runtime/package-deploy.py status --mode project-local --target-root .
 ```
 
-### 4. 安装成功判定
+### 5. 安装成功判定
 
 只有同时满足以下条件，才可以报告安装成功：
 
@@ -90,7 +127,7 @@ python3 /mnt/d/Code/WorkflowProgram-CN/opencode-v2/package/.workflowprogram/runt
   - `.workflowprogram/package/runtime/workflow-entry.py`
   - `.workflowprogram/package/install-manifest.json`
 
-### 5. 完成后的用户提示
+### 6. 完成后的用户提示
 
 安装成功后，告诉用户：
 
@@ -98,6 +135,7 @@ python3 /mnt/d/Code/WorkflowProgram-CN/opencode-v2/package/.workflowprogram/runt
 - 然后检查 `/wp-develop`、`/wp-doctor`、`/wp-preflight`、`/wp-hotfix`、`/wp-iterate`、`/wp-audit`、`/wp-evolve`、`/wp-orchestrate`、`/wp-ship`、`/wp-validate` 是否出现
 - 如需使用 package agents，可检查 `@workflow-designer`、`@workflow-validator`、`@workflow-verifier`、`@test-scenario-generator` 等是否可见
 - 如果 OpenCode 仍显示旧命令列表，重启 OpenCode 或重新打开当前项目
+- 如果使用的是全局 bootstrap，新项目第一次只会看到 `/wp-install` 等部署命令；完整 `/wp-develop` 等命令需要项目本地安装后刷新才会出现
 
 ## 故障处理
 
@@ -127,6 +165,13 @@ python3 /mnt/d/Code/WorkflowProgram-CN/opencode-v2/package/.workflowprogram/runt
 - 检查 `DOC-08` 的来源路径
 - 不要自动删除全局 OpenCode、Claude 或 oh-my-opencode 资产
 - 把冲突路径和建议隔离方式报告给用户
+
+### 全局 bootstrap 存在但 `/wp-install` 不出现
+
+- 执行 `package-deploy.py bootstrap-status`
+- 检查 OpenCode global config root 是否与当前 OpenCode 读取的路径一致
+- 如果设置了 `OPENCODE_CONFIG_DIR`，确保安装 bootstrap 时使用的是同一个目录
+- 重启 OpenCode 或重新打开项目
 
 ### 需要离线或锁定依赖安装
 

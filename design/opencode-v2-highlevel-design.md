@@ -24,7 +24,7 @@
 
 ### 核心架构与关键需求
 
-本系统有两条主链路。
+本系统有三条主链路。
 
 **链路 A：产品包加载链**
 
@@ -37,6 +37,12 @@
 - 输入：用户需求、目标项目路径、执行约束
 - 处理：需求澄清 -> 设计 -> 目标 bundle 生成 -> managed apply -> 验证 -> lessons
 - 输出：`TARGET_ROOT/.opencode/*`、`TARGET_ROOT/.workflowprogram/*`、`RUN_ROOT/*`
+
+**链路 C：全局轻量部署链**
+
+- 输入：用户全局 OpenCode 配置路径、用户级 package cache、当前项目路径
+- 处理：全局 bootstrap command -> bootstrap runtime -> cached package -> project-local install
+- 输出：当前项目获得完整 WorkflowProgram project-local 安装；全局路径只保留部署器，不承载完整产品包
 
 关键需求列表如下：
 
@@ -62,6 +68,7 @@
 | AR-18 | 运行可审计 | 权限、隐私脱敏、日志保留、错误分类必须可被 validator 和 doctor 统一解释 |
 | AR-19 | 平台边界明确 | WSL/Windows 路径、离线依赖、OpenCode 版本兼容和 plugin reload 规则必须显式记录 |
 | AR-20 | 能力差距可追踪 | ClaudeCode 到 OpenCode 的能力映射必须维护为设计资产，明确已实现、不适用、待规划和替代实现 |
+| AR-21 | 全局部署器轻量化 | 为改善新项目体验，可提供全局 bootstrap，但完整 WorkflowProgram 仍必须物化为 project-local 安装 |
 
 ### 架构级原则与约束
 
@@ -76,6 +83,8 @@
 - package plugin 与 target plugin 必须具备不同逻辑标识，避免 hook 与 tool 冲突。
 - target commands 必须避免复用 `/wp-*` 产品命名空间。
 - `project-local` 安装允许 package commands/plugins 与 target commands/plugins 共存于同一项目根，但 package runtime 必须位于 `.workflowprogram/package/runtime/`，不得与 target runtime 共用路径。
+- 全局 bootstrap 只允许安装 `/wp-install`、`/wp-status`、`/wp-upgrade`、`/wp-uninstall` 以及 bootstrap runtime；不得全局安装完整 lifecycle commands、agents 或 package plugin。
+- 用户级 package cache 只能作为安装源，不作为运行时真源；项目一旦安装完成，运行时应以项目本地 manifest 和 `.workflowprogram/package/runtime/` 为准。
 - package runtime 的 Python 依赖必须显式声明；v1 通过 `requirements.txt` 声明，并允许安装器创建 `.workflowprogram/package/.venv` 作为专用解释器。
 - 任何运行时依赖的 validator 脚本都必须随 `WP_PACKAGE_ROOT` 一起交付，不得依赖仓库根目录中的额外源码。
 - 所有目标写入必须先生成 candidate，再执行 managed apply。
@@ -91,6 +100,10 @@
 graph LR
     U["用户"] --> H["OpenCode Host"]
     H --> P["WP_PACKAGE_ROOT\nWorkflowProgram 产品包"]
+    H --> GB["Global Bootstrap\n轻量部署器"]
+    GB --> Cache["User Package Cache\n版本化 package copy"]
+    GB --> T
+    Cache --> T
     P --> R["WorkflowProgram Runtime"]
     R --> T["TARGET_ROOT\n目标项目"]
     R --> E["RUN_ROOT\n运行证据"]
@@ -103,6 +116,8 @@ graph LR
 | 接口名 | 提供者 | 使用者 | 协议/机制 | 功能描述 |
 |---|---|---|---|---|
 | Package Load Interface | OpenCode Host | WorkflowProgram 产品包 | 本地目录自动发现 | 加载 package commands、package agents 与 package plugin |
+| Bootstrap Command Interface | Global Bootstrap | 用户 | OpenCode global Markdown command | 提供 `/wp-install`、`/wp-status`、`/wp-upgrade`、`/wp-uninstall` 项目部署入口 |
+| Bootstrap Cache Interface | Global Bootstrap | Project Installer | 文件系统 + manifest | 从用户级版本化 cache 读取完整 package 作为 project-local 安装源 |
 | Package Command Interface | WorkflowProgram 包 | 用户 | Markdown command | 提供 `/wp-develop`、`/wp-validate` 等产品入口 |
 | Package Plugin Interface | WorkflowProgram 包 | OpenCode Host | `.opencode/plugins/*.ts` | 注册 hook/custom tool |
 | Runtime Entry Interface | WorkflowProgram Runtime | Package Command | 本地脚本调用 | 承接产品命令后的确定性编排 |
@@ -174,6 +189,22 @@ sequenceDiagram
     RV-->>CI: run-state verdict
 ```
 
+#### KR-05 全局 bootstrap 部署到新项目
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant GB as Global Bootstrap Command
+    participant BR as Bootstrap Runtime
+    participant Cache as User Package Cache
+    participant Target as TARGET_ROOT
+    User->>GB: /wp-install
+    GB->>BR: install --target-root $PWD
+    BR->>Cache: locate cached package
+    BR->>Target: call package-deploy project-local install
+    Target-->>User: project-local WorkflowProgram available after reload
+```
+
 ## 系统架构设计模型
 ### 逻辑模型
 #### 1层逻辑模型
@@ -196,6 +227,8 @@ graph TB
 graph TB
     A1["Package Commands"]
     A2["Package Plugin"]
+    A0["Global Bootstrap Commands"]
+    A3["User Package Cache"]
     B1["Intent Router"]
     B2["Workflow Spec Engine"]
     B3["Target Bundle Generator"]
@@ -523,3 +556,5 @@ graph TB
 | agentteam 与 subagent 是否等价 | 不等价；agentteam 是阶段职责与团队结构，subagent 是执行机制 |
 | target host smoke 是否替代 package host smoke | 不替代；二者分别验证产品包可见性和目标工作流可见性 |
 | release build 是否替代 `package/` 部署源 | 不替代 v1 安装路径；作为发布和 CI 的干净产物来源 |
+    A0 --> A3
+    A0 --> B1

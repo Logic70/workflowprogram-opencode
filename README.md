@@ -15,7 +15,8 @@ WorkflowProgram 的 OpenCode 独立版本。
 - `/wp-ship`：确认已有目标工作流的交付就绪度
 - `/wp-validate`：对 package、spec、target bundle、run-state 做分层校验
 - package agent pack：`@workflow-designer`、`@workflow-validator`、`@workflow-verifier`、`@logic-reviewer`、`@security-reviewer`、`@performance-reviewer`、`@style-reviewer`、`@test-scenario-generator`
-- `project-local` / `global` 安装
+- `project-local` 安装
+- 全局轻量 bootstrap：`/wp-install`、`/wp-status`、`/wp-upgrade`、`/wp-uninstall`
 - 可选 package 专用 Python `venv`
 - runtime smoke、真实 OpenCode package host integration smoke、target host reload smoke
 
@@ -55,9 +56,31 @@ WorkflowProgram 的 OpenCode 独立版本。
 
 ## 安装
 
-### 方式一：直接执行安装脚本
+### 方式一：安装全局轻量 bootstrap 后在项目中部署
 
 推荐。
+
+先安装一次全局 bootstrap：
+
+```bash
+python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py install-bootstrap --source-package-root <repo-root>/package --force
+```
+
+然后在任意新项目中打开 OpenCode，执行：
+
+```text
+/wp-install
+```
+
+这个全局 bootstrap 只负责部署当前项目，不会把完整 `/wp-develop`、agents 或 package plugin 全局安装。完整 WorkflowProgram 仍会被物化到当前项目的 `.opencode/*` 和 `.workflowprogram/package/*`。
+
+可检查全局 bootstrap：
+
+```bash
+python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py bootstrap-status
+```
+
+### 方式二：直接执行项目本地安装脚本
 
 在目标项目中执行：
 
@@ -77,7 +100,7 @@ python D:\Code\workflowprogram-opencode\package\.workflowprogram\runtime\package
 python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py status --mode project-local --target-root <target-project-root>
 ```
 
-### 方式二：让 OpenCode 读取安装说明自行执行
+### 方式三：让 OpenCode 读取安装说明自行执行
 
 可行，但它本质上仍然是“agent 按文档执行命令”，不是替代安装脚本的原生安装机制。
 
@@ -217,6 +240,9 @@ python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py status --
   - 检查已生成 target command/plugin 的静态可见性
   - 真实 OpenCode 可用时尝试通过 target command 进入目标 runtime
   - provider/API 不可用时只返回 `ENVIRONMENT-SKIP`，不伪造 `PASS`
+- `global bootstrap smoke`
+  - 验证 `install-bootstrap -> bootstrap-status -> bootstrap-runtime install -> bootstrap-runtime status`
+  - 保证全局只安装部署器，完整 package 仍安装到项目本地
 
 手工运行 host integration smoke：
 

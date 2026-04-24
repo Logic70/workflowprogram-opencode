@@ -1,0 +1,4 @@
+id: add-global-bootstrap-installer
+status: implemented
+title: Add lightweight global bootstrap installer for project-local WorkflowProgram deployment
+owner: workflowprogram-opencode

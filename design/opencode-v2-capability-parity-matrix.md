@@ -37,6 +37,7 @@
 | Target reload smoke | 目标工作流真实加载 | 已实现 | target host reload smoke；API 不可用时按 `ENVIRONMENT-SKIP` 分类，不伪造真实执行结果 | `opencode-target-host-verification` |
 | Build/release | Claude plugin/package metadata | 替代实现 | OpenCode release build from `package/` to clean artifact | `opencode-release-and-installation` |
 | 安装生命周期 | plugin install/runtime bootstrap | 已实现 | package deploy + venv + status/reinstall/lock regression | `opencode-release-and-installation` |
+| 新项目安装体验 | 全局 skill/command 引导安装 | 已实现 | 全局轻量 `/wp-install` bootstrap + 用户级 cache + project-local materialization | `opencode-global-bootstrap-installer` |
 | Schema 演进 | 隐式脚本契约 | 已实现 | schema version + migration | `opencode-contract-hardening` |
 | 写入恢复 | managed generation | 已实现 | lock、idempotency、rollback/recover manifest | `opencode-contract-hardening` |
 | 权限与隐私 | settings/hooks 约束 | 已实现 | permission policy + privacy redaction | `opencode-contract-hardening` |

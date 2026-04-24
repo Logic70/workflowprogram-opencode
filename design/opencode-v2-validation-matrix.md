@@ -104,6 +104,7 @@
 | SMK-05 | validation smoke | 能输出多层校验摘要 | validation summary 存在 |
 | SMK-06 | host integration smoke | WorkflowProgram 产品包在真实 OpenCode 宿主中的最小可发现性成立 | package commands/plugin 至少可被宿主发现；若 provider/API 未就绪可返回 `ENVIRONMENT-SKIP` |
 | SMK-07 | target host reload smoke | 生成后的 target workflow 在真实 OpenCode 宿主中可发现 | target commands/plugins 在 host reload 后可见；无真实 host 时只能返回 `ENVIRONMENT-SKIP` |
+| SMK-08 | global bootstrap smoke | 全局轻量部署器可安装新项目 | bootstrap install/status PASS，bootstrap runtime 能完成 project-local install/status |
 
 ## 7.1 后续能力硬化检查项
 
@@ -119,6 +120,10 @@
 | APP-01 | managed apply lock/rollback 存在 | apply evidence | 变更型 intent 必须具备 lock 与恢复证据 | apply_recovery |
 | ERR-01 | error code 合法 | runtime/validator/doctor/smoke reports | 失败必须包含稳定 error code 与 remediation | error_taxonomy |
 | SEC-01 | 证据脱敏 | logs/reports/events | 不得泄露 token/API key/敏感环境变量 | privacy |
+| GBI-01 | bootstrap manifest 合法 | global bootstrap manifest | 必须记录 global root、cache root、cache package root 和命令清单 | bootstrap_contract |
+| GBI-02 | bootstrap command 范围最小 | global `commands/` | 只能安装 `/wp-install`、`/wp-status`、`/wp-upgrade`、`/wp-uninstall` | bootstrap_isolation |
+| GBI-03 | cache package 可用 | user cache | cached package 必须包含 `package-deploy.py` 和完整 package layout | bootstrap_cache |
+| GBI-04 | bootstrap-driven project install | bootstrap runtime output | 必须复用 project-local install manifest，不得绕过 `package-deploy.py` | bootstrap_install |
 
 ## 8. 需求到校验追踪矩阵
 
@@ -142,6 +147,7 @@
 | AR-16 契约可演进 | MIG-01 |
 | AR-17 写入可恢复 | APP-01 |
 | AR-18 运行可审计 | ERR-01, SEC-01 |
+| AR-21 全局部署器轻量化 | GBI-01 ~ GBI-04, SMK-08 |
 
 ## 9. 建议执行顺序
 

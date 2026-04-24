@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ClaudeCode 到 OpenCode 适配核心关注点</title>
+  <style>
+    :root {
+      --bg: #f6f1e8;
+      --paper: #fffaf0;
+      --ink: #202018;
+      --muted: #665f52;
+      --line: #d8c8aa;
+      --accent: #0f5f5c;
+      --accent-2: #a6531f;
+      --code: #24312f;
+    }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at top left, rgba(15, 95, 92, 0.12), transparent 32rem),
+        linear-gradient(135deg, #f6f1e8 0%, #efe2ca 100%);
+      color: var(--ink);
+      font: 16px/1.62 "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+    }
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 56px 24px 72px;
+    }
+    header {
+      border: 1px solid var(--line);
+      background: rgba(255, 250, 240, 0.88);
+      border-radius: 28px;
+      padding: 36px;
+      box-shadow: 0 24px 70px rgba(32, 32, 24, 0.12);
+    }
+    h1, h2, h3 {
+      line-height: 1.15;
+      margin: 0;
+    }
+    h1 {
+      font-size: clamp(2rem, 5vw, 4.5rem);
+      letter-spacing: -0.04em;
+    }
+    h2 {
+      margin-top: 44px;
+      font-size: 1.8rem;
+      color: var(--accent);
+    }
+    h3 {
+      margin-top: 20px;
+      font-size: 1.15rem;
+      color: var(--accent-2);
+    }
+    p {
+      margin: 14px 0 0;
+    }
+    .lead {
+      max-width: 820px;
+      color: var(--muted);
+      font-size: 1.14rem;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 18px;
+      margin-top: 22px;
+    }
+    .card {
+      border: 1px solid var(--line);
+      background: rgba(255, 250, 240, 0.78);
+      border-radius: 22px;
+      padding: 22px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 18px;
+      background: rgba(255, 250, 240, 0.82);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      overflow: hidden;
+    }
+    th, td {
+      vertical-align: top;
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+      padding: 14px 16px;
+    }
+    th {
+      color: var(--accent);
+      background: rgba(15, 95, 92, 0.08);
+      font-weight: 700;
+    }
+    tr:last-child td {
+      border-bottom: 0;
+    }
+    code {
+      color: var(--code);
+      background: rgba(15, 95, 92, 0.08);
+      border: 1px solid rgba(15, 95, 92, 0.14);
+      border-radius: 7px;
+      padding: 0.08rem 0.32rem;
+      font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+      font-size: 0.92em;
+    }
+    ul {
+      padding-left: 1.2rem;
+    }
+    li {
+      margin: 0.45rem 0;
+    }
+    .callout {
+      border-left: 6px solid var(--accent);
+      background: rgba(15, 95, 92, 0.08);
+      border-radius: 16px;
+      padding: 18px 20px;
+      margin-top: 22px;
+    }
+    .tag {
+      display: inline-block;
+      margin: 12px 8px 0 0;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(166, 83, 31, 0.1);
+      color: var(--accent-2);
+      border: 1px solid rgba(166, 83, 31, 0.18);
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>ClaudeCode 到 OpenCode 适配核心关注点</h1>
+      <p class="lead">
+        本文总结 WorkflowProgram 从 ClaudeCode 元工作流迁移到 OpenCode 独立版本时的关键设计判断。
+        核心原则是：不做 ClaudeCode 目录结构兼容层，而是用 OpenCode 原生的 commands、agents、plugins、runtime 和项目本地安装模型重新落地同等产品能力。
+      </p>
+      <span class="tag">OpenCode only</span>
+      <span class="tag">Project-local materialization</span>
+      <span class="tag">Global bootstrap only</span>
+      <span class="tag">Layered contracts</span>
+    </header>
+
+    <h2>一、核心关注点</h2>
+    <div class="grid">
+      <section class="card">
+        <h3>加载边界</h3>
+        <p>必须区分 WorkflowProgram 自身如何被 OpenCode 加载，以及 WorkflowProgram 生成的目标工作流如何被 OpenCode 加载。前者是产品包契约，后者是目标 bundle 契约。</p>
+      </section>
+      <section class="card">
+        <h3>命名空间</h3>
+        <p><code>/wp-*</code> 归 WorkflowProgram 产品命令所有；目标工作流命令不能占用该命名空间，package plugin 和 target plugin 也不能复用逻辑标识。</p>
+      </section>
+      <section class="card">
+        <h3>安装体验</h3>
+        <p>完整全局安装易用但污染风险高；纯项目安装隔离好但新项目体验差。最终采用全局轻量 bootstrap、用户级 cache、项目本地物化三层模型。</p>
+      </section>
+      <section class="card">
+        <h3>验证真实性</h3>
+        <p>runtime smoke 只能证明 Python 主链可运行；host smoke 才能证明 OpenCode 可发现命令和插件；target host smoke 才能证明生成物对宿主可见。</p>
+      </section>
+    </div>
+
+    <h2>二、主要难点与解决方案</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>难点</th>
+          <th>风险</th>
+          <th>解决方案</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Claude skill、command、hook 与 OpenCode agent、command、plugin 不是一一映射</td>
+          <td>把 ClaudeCode 的加载模型错误复制到 OpenCode，导致 schema 和交付形态混乱</td>
+          <td>只迁移产品能力，不迁移 Claude 目录结构；OpenCode 版以 <code>.opencode/commands</code>、<code>.opencode/agents</code>、<code>.opencode/plugins</code> 为宿主真源。</td>
+        </tr>
+        <tr>
+          <td>WorkflowProgram 产品包和目标工作流都可能生成 OpenCode 资产</td>
+          <td>产品包插件、目标插件、产品命令、目标命令互相覆盖</td>
+          <td>定义三根路径：<code>WP_PACKAGE_ROOT</code>、<code>TARGET_ROOT</code>、<code>RUN_ROOT</code>；目标命令禁止 <code>wp-*</code>；target plugin 禁止使用 package plugin 标识。</td>
+        </tr>
+        <tr>
+          <td>OpenCode 可能读取全局配置、Claude 目录或 oh-my-opencode 资产</td>
+          <td>用户以为使用的是当前项目 WorkflowProgram，实际命令或 skill 来自其它路径</td>
+          <td><code>/wp-doctor</code> 增加 host source inventory、shadowing 检测、WSL/Windows 路径诊断和 reload guidance。</td>
+        </tr>
+        <tr>
+          <td>项目本地安装每个项目都要执行一次</td>
+          <td>用户体验不友好，安装命令难记</td>
+          <td>新增全局轻量 bootstrap：全局只安装 <code>/wp-install</code>、<code>/wp-status</code>、<code>/wp-upgrade</code>、<code>/wp-uninstall</code>，完整 package 仍物化到项目本地。</td>
+        </tr>
+        <tr>
+          <td>Python 依赖可能缺失，尤其是 <code>PyYAML</code></td>
+          <td>安装器或 runtime 无法启动</td>
+          <td>声明 <code>requirements.txt</code> 和 <code>requirements.lock.txt</code>；项目安装可创建 <code>.workflowprogram/package/.venv</code>；bootstrap 可先预置 venv 再运行 package deploy。</td>
+        </tr>
+        <tr>
+          <td>真实 OpenCode 执行依赖 provider/API，可用性不稳定</td>
+          <td>测试假阳性或把环境问题误判为设计失败</td>
+          <td>测试结果分为 <code>PASS</code>、<code>FAIL</code>、<code>ENVIRONMENT-SKIP</code>；无 API 时不声称真实宿主执行成功。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>三、最终架构取舍</h2>
+    <div class="callout">
+      <p>
+        最终选择不是“完整全局安装”，也不是“每个项目都手动执行长命令”，而是：
+        <strong>全局轻量 bootstrap + 用户级版本化 package cache + 项目本地 materialized install</strong>。
+      </p>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>方案</th>
+          <th>结论</th>
+          <th>原因</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>完整全局安装</td>
+          <td>不采用</td>
+          <td>易造成命令污染、版本串扰、项目间不可复现和 Claude/OpenCode 资产混读。</td>
+        </tr>
+        <tr>
+          <td>纯项目本地安装</td>
+          <td>保留为基础能力</td>
+          <td>隔离性最好，但新项目首次使用不够友好。</td>
+        </tr>
+        <tr>
+          <td>全局轻量 bootstrap</td>
+          <td>采用</td>
+          <td>用户只需全局安装一次部署器；每个项目仍获得完整、可诊断、可回滚的本地安装。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>四、验收口径</h2>
+    <ul>
+      <li>全局 bootstrap 只出现部署命令，不出现完整 <code>/wp-develop</code> 产品生命周期命令。</li>
+      <li>新项目执行 <code>/wp-install</code> 后，项目内出现完整 <code>.opencode/*</code> 和 <code>.workflowprogram/package/*</code>。</li>
+      <li>项目安装后重启 OpenCode，完整 <code>/wp-*</code> 命令和 package agents 可见。</li>
+      <li>runtime smoke、host integration smoke、target host smoke 和 bootstrap smoke 各自独立报告，不互相替代。</li>
+      <li>所有写入型 intent 都走 candidate、managed apply、lock 和 rollback manifest。</li>
+    </ul>
+  </main>
+</body>
+</html>
