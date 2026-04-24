@@ -18,12 +18,14 @@ from runtime_common import (  # noqa: E402
     PACKAGE_COMMAND_PREFIX,
     PACKAGE_PLUGIN_FILE,
     PACKAGE_PLUGIN_ID,
+    SCHEMA_VERSION,
     derive_expected_target_files,
     read_json,
     read_yaml,
     registry_commands,
     registry_plugins,
 )
+from error_codes import code_for, remediation_for  # noqa: E402
 
 
 def _check(check_id: str, passed: bool, detail: str, category: str) -> dict[str, Any]:
@@ -32,6 +34,8 @@ def _check(check_id: str, passed: bool, detail: str, category: str) -> dict[str,
         "passed": passed,
         "detail": detail,
         "category": category,
+        "error_code": None if passed else code_for(category, check_id),
+        "remediation": None if passed else remediation_for(category),
     }
 
 
@@ -60,6 +64,14 @@ def validate_target_bundle(target_root: Path) -> dict[str, Any]:
 
     spec = read_yaml(spec_path)
     spec = spec if isinstance(spec, dict) else {}
+    checks.append(
+        _check(
+            "MIG-01",
+            spec.get("schema_version") in {SCHEMA_VERSION, None},
+            f"schema_version={spec.get('schema_version') or 'legacy-v1'}",
+            "schema_contract",
+        )
+    )
     deliverables = derive_expected_target_files(spec)
     missing_deliverables = [path for path in deliverables if not (resolved / path).exists()]
     checks.append(
@@ -77,6 +89,7 @@ def validate_target_bundle(target_root: Path) -> dict[str, Any]:
         try:
             manifest_payload = read_json(manifest_path)
             manifest_entries = manifest_payload.get("entries", [])
+            manifest_ok = manifest_payload.get("schema_version") in {SCHEMA_VERSION, None}
         except Exception:
             manifest_ok = False
     checks.append(

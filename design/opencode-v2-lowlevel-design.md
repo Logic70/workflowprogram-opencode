@@ -29,6 +29,21 @@
 | FR-11 | Package/Target Isolation | 产品包资产与目标工作流资产必须隔离 |
 | FR-12 | Name Collision Avoidance | package command/plugin 与 target command/plugin 不得冲突 |
 | FR-13 | Install & Deploy | 通过安装脚本把 `package/` 部署成 OpenCode 可发现布局 |
+| FR-14 | Lifecycle Intent Closure | `audit`、`evolve`、`orchestrate` 与现有 intent 进入统一 command/runtime/spec contract |
+| FR-15 | Agent Role Schema | package agents 具备机器可读的角色、阶段、能力、触发条件和优先级 |
+| FR-16 | Agent Team Orchestration | runtime 能生成 team plan，并把 subagent 作为执行机制调用和汇聚 |
+| FR-17 | Test Scenario Generation | 提供测试场景生成 agent 与 evidence 输出 |
+| FR-18 | Host Isolation Diagnosis | doctor 能识别外部 OpenCode/Claude/oh-my-opencode 资产串入风险 |
+| FR-19 | Host Compatibility Matrix | 记录 OpenCode 版本、plugin API、reload 要求和降级策略 |
+| FR-20 | Target Host Reload Smoke | 验证生成后的 target command/plugin 被真实 OpenCode host 发现 |
+| FR-21 | Release Package Build | 生成干净 release 包，排除运行态和本地依赖痕迹 |
+| FR-22 | Schema Version & Migration | spec、manifest、run-state、install manifest 支持版本和迁移 |
+| FR-23 | Managed Apply Hardening | 增加并发锁、幂等性、冲突解释、失败恢复与 rollback manifest |
+| FR-24 | Unified Error Taxonomy | runtime、validator、doctor、plugin 使用统一错误码和 remediation |
+| FR-25 | Permission & Privacy Policy | 明确写入权限、shell 执行、日志脱敏、证据保留策略 |
+| FR-26 | Offline & Cross-Platform Install | 支持离线依赖、WSL/Windows 路径和重复安装/升级/卸载测试 |
+| FR-27 | Deep Validation | 补充 draft、lowlevel、generated runtime、lessons delta、clarification review 校验 |
+| FR-28 | Capability Parity Matrix | 维护 ClaudeCode 能力到 OpenCode 能力的可追踪映射 |
 
 ## 特性分析
 ### 使用场景分析
@@ -42,6 +57,14 @@
 | UC-05 插件能力接入 | package plugin 已被宿主加载 | hook、custom tool | 仅提供 runtime 所必需能力，不替代 runtime 主链 |
 | UC-06 目标工作流被宿主加载 | 目标 bundle 已交付到 `TARGET_ROOT` | commands only、commands + plugin | 宿主扫描 target OpenCode 资产并注册 |
 | UC-07 产品包安装部署 | 用户执行安装脚本 | project-local、global、状态检查、卸载 | 复制产品命令/插件/runtime、合并配置、写 install manifest |
+| UC-08 产品生命周期编排 | 用户不确定该执行哪个 `/wp-*` | audit、evolve、orchestrate | 识别 intent、路由命令、保持 command/runtime/spec flow 一致 |
+| UC-09 agentteam 编排 | 设计、校验、审计需要多角色协作 | 顺序评审、fan-out/fan-in、quorum | 生成 team plan、调用 subagent、汇聚结论 |
+| UC-10 宿主隔离诊断 | OpenCode 识别了非本项目资产 | global config、Claude 目录、oh-my-opencode | 扫描资产来源、输出污染风险和隔离建议 |
+| UC-11 target host reload 验证 | 目标 workflow 已生成 | target command、target plugin | 真实启动或调用 OpenCode host 验证目标资产可见 |
+| UC-12 发布构建 | 准备上传 GitHub/release | source package、dist package | 清洗构建、生成 manifest、校验完整性 |
+| UC-13 契约升级 | spec/manifest 版本变化 | 自动迁移、拒绝迁移 | 读取版本、执行迁移、记录迁移报告 |
+| UC-14 写入恢复 | apply 中断或冲突 | 并发、只读、用户改动 | 加锁、生成冲突说明、回滚或恢复 |
+| UC-15 离线与跨平台安装 | 无网络或 WSL/Windows 混用 | dependency lock、路径转换 | 使用锁定依赖、规范化路径、提示 reload |
 
 ### 影响分析
 #### 依赖与技术限制
@@ -363,3 +386,195 @@ sequenceDiagram
 | C-06 | 目标命令和目标插件不得占用 `wp-*` 与 `workflowprogram.ts` 产品标识 |
 | C-07 | 可部署的 `WP_PACKAGE_ROOT` 必须自包含 runtime 与 validator，不得运行时回跳仓库根目录取脚本 |
 | C-08 | 部署后的 package runtime 必须位于 `.workflowprogram/package/runtime/`，不得与 target `.workflowprogram/runtime/` 复用同一路径 |
+| C-09 | command 文件、`SUPPORTED_PACKAGE_INTENTS`、runtime handler、spec `intent_flows` 必须保持一一可追踪 |
+| C-10 | agentteam 只描述团队结构和阶段职责，不直接等同于 OpenCode subagent 执行机制 |
+| C-11 | host isolation 只能诊断和建议隔离，不能默认删除用户全局 OpenCode 或 Claude 资产 |
+| C-12 | target host reload smoke 必须与 package host smoke 分开计分 |
+| C-13 | release build 产物不得包含 `.workflowprogram/runs`、`__pycache__`、`node_modules`、本地 lock 或 provider token |
+| C-14 | schema migration 必须保留原始版本与迁移报告，不得静默改写用户无法追踪的状态 |
+| C-15 | managed apply 必须先加锁再写入，失败时产出可恢复状态 |
+| C-16 | 所有错误必须映射到统一 error code，不能只输出自由文本 |
+| C-17 | 日志和证据默认不得泄露 API key、token、完整敏感环境变量 |
+| C-18 | 离线安装路径不得强依赖实时网络；网络依赖只能作为可选加速路径 |
+
+## 差距闭环实现设计
+
+本节把 HighLevel 中的 `GC-*` 改动目标落到实现级方案。实施原则是先保证契约一致，再扩展体验；先补可验证缺口，再补产品化增强。
+
+### 总体实现方案
+
+```mermaid
+graph TB
+    Cmd["/wp-* commands"]
+    Registry["intent-contract.json"]
+    Orch["orchestrator"]
+    Team["agent role registry + team planner"]
+    Runtime["workflow-entry / workflow-runner"]
+    Validators["deep validators"]
+    Doctor["host isolation doctor"]
+    Smoke["target host reload smoke"]
+    Build["release builder"]
+    Matrix["capability parity matrix"]
+
+    Cmd --> Registry
+    Registry --> Orch
+    Orch --> Runtime
+    Orch --> Team
+    Team --> Runtime
+    Runtime --> Validators
+    Doctor --> Validators
+    Runtime --> Smoke
+    Build --> Validators
+    Matrix --> Registry
+```
+
+### 改动目标到实现模块映射
+
+| 改动目标 | 新增/修改模块 | 关键输出 |
+|---|---|---|
+| GC-01 生命周期入口完整 | `runtime_common.py`、`workflow-entry.py`、`workflow-runner.py`、`route-intent.py`、`package/.opencode/commands/wp-audit.md`、`wp-evolve.md`、`wp-orchestrate.md` | intent contract、run summary、audit/evolve report |
+| GC-02 agentteam 编排 | `agent-role-registry.json`、`agent-team-planner.py`、agent frontmatter | team plan、dispatch trace、fan-in report |
+| GC-03 测试场景生成 | `package/.opencode/agents/test-scenario-generator.md`、`test-scenario-generator` runtime adapter | test scenarios artifact |
+| GC-04 宿主隔离与兼容诊断 | `doctor.py`、`discover-host-capabilities.py`、`probe-host-capabilities.py` | host isolation report、compatibility verdict |
+| GC-05 target host reload smoke | `host-integration-smoke.py` 或新增 `target-host-smoke.py` | target command/plugin discovery report |
+| GC-06 release build | `tools/build_package.py`、`dist/opencode/manifest.json` | clean package、checksum、release manifest |
+| GC-07 schema migration | `schema_versions.py`、`migrations/` | migration plan/report |
+| GC-08 managed apply hardening | `managed-assets.py`、`lockfile`、`rollback manifest` | conflict report、rollback/recover report |
+| GC-09 错误码与权限 | `error_codes.py`、`permission_policy.yaml`、plugin/runtime adapters | typed failure code、remediation |
+| GC-10 深度 validator | `validate-workflow-draft.py`、`validate-workflow-lowlevel.py`、`validate-generated-runtime.py`、`validate-lessons-delta.py`、`generate-clarification-review.py` | deep validation summary |
+| GC-11 安装生命周期 | `package-deploy.py`、`requirements.lock.txt`、installer smoke | upgrade/uninstall/offline/path report |
+| GC-12 能力映射矩阵 | `design/opencode-v2-capability-parity-matrix.md` | parity status and traceability |
+
+### UC-08 产品生命周期编排实现
+
+#### 设计思路
+
+- 建立单一 `IntentContract`，记录每个 intent 的 command 文件、runtime id、是否变更目标项目、必须阶段、输出证据和允许失败类型。
+- `/wp-orchestrate` 调用 `route-intent.py`，根据用户自然语言选择 intent；若置信度不足则输出澄清问题，不直接执行变更型 intent。
+- `audit` 为非变更 intent，检查目标工作流设计、证据、host 加载和 lessons。
+- `evolve` 为受控变更 intent，必须基于 audit 或 validate 的证据生成变更计划，再走 managed apply。
+
+#### 实体关系分析
+
+| 实体 | 说明 |
+|---|---|
+| `IntentContract` | command/runtime/spec flow 的真源映射 |
+| `IntentRouteResult` | `/wp-orchestrate` 的路由结果 |
+| `AuditReport` | 非变更审计报告 |
+| `EvolvePlan` | 基于审计和 lessons 的演进计划 |
+
+### UC-09 agentteam 编排实现
+
+#### 设计思路
+
+- agent 文件继续使用 OpenCode subagent 机制，但增加机器可读 frontmatter。
+- `agentteam` 由 runtime 生成 `team-plan.json`，描述阶段、角色、并行度、输入、输出、汇聚策略。
+- subagent 是执行手段；同一阶段可以无 agent、一个 agent、多个 agent 并行或多轮 fan-in。
+- `workflow-designer` 负责设计，`workflow-validator` 负责契约校验，`workflow-verifier` 负责证据闭环，reviewer 负责专项审查，`test-scenario-generator` 负责场景覆盖。
+
+#### 推荐 agent frontmatter
+
+```yaml
+role: workflow-validator
+stage_affinity: [validate, audit, ship]
+capabilities: [contract-check, evidence-review]
+trigger: on-validation-required
+priority: 50
+fan_in: required
+```
+
+### UC-10 宿主隔离诊断实现
+
+#### 设计思路
+
+- doctor 增加 host source inventory：列出当前项目 `.opencode/*`、全局 OpenCode config、可能被宿主识别的 Claude/oh-my-opencode 资产。
+- 输出只读诊断，不自动删除或移动用户资产。
+- remediation 只提供明确步骤，例如设置项目级隔离目录、重启 OpenCode、清理误挂载路径。
+
+#### 检查项
+
+| 检查 | 失败分类 |
+|---|---|
+| 全局 OpenCode config 是否注入额外 commands/agents/skills | `host_pollution` |
+| Claude `.claude/skills` 是否被当前 OpenCode 进程识别 | `cross_host_pollution` |
+| oh-my-opencode 是否提供同名 agent/skill/command | `namespace_shadowing` |
+| OpenCode 版本是否满足 plugin API 要求 | `host_incompatible` |
+| plugin 更新后是否需要 reload/restart | `host_reload_required` |
+
+### UC-11 target host reload smoke 实现
+
+#### 设计思路
+
+- 分成两类 smoke：
+  - package host smoke：验证 WorkflowProgram 产品包可见。
+  - target host reload smoke：验证目标 workflow 生成物可见。
+- target host reload smoke 必须先运行 `/wp-develop` 生成带 target command/plugin 的 fixture，再通过真实 OpenCode host 检查目标资产。
+- provider/API 不可用时只能返回 `ENVIRONMENT-SKIP`，不能伪造 PASS。
+
+### UC-12 release build 实现
+
+#### 设计思路
+
+- 新增构建脚本从 `package/` 复制到 `dist/opencode/` 或 release archive。
+- 构建前执行清洗规则，禁止包含运行态目录和本地依赖目录。
+- 构建后执行 package validator、install smoke 和 checksum 校验。
+
+#### Release Manifest 最小字段
+
+| 字段 | 说明 |
+|---|---|
+| `package_version` | WorkflowProgram OpenCode 包版本 |
+| `source_commit` | 构建来源 commit |
+| `build_time` | 构建时间 |
+| `included_files` | 发布文件清单 |
+| `excluded_patterns` | 清洗规则 |
+| `checksums` | 文件或 archive checksum |
+
+### UC-13 契约升级实现
+
+#### 设计思路
+
+- `workflow-spec.yaml`、`managed-files.json`、`state.json`、`install-manifest.json` 都必须有 `schema_version`。
+- validator 先判断版本，再决定直接校验、自动迁移或拒绝。
+- migration 输出 `migration-report.json`，记录 from/to、变更项、备份位置和风险。
+
+### UC-14 写入恢复实现
+
+#### 设计思路
+
+- managed apply 开始前创建 lock，lock 中记录 pid、run id、target root、开始时间。
+- diff 使用内容 hash，重复执行相同 candidate 不产生无意义改动。
+- 写入前生成 rollback manifest；中断后 `/wp-doctor` 能识别并提示 recover/rollback。
+
+### UC-15 离线与跨平台安装实现
+
+#### 设计思路
+
+- `requirements.lock.txt` 作为离线和可复现安装依据。
+- 安装脚本必须明确当前 Python、pip、venv、路径风格和 OpenCode 命令来源。
+- WSL/Windows 混用时，manifest 同时记录原始路径和规范化路径；命令模板只使用当前宿主可执行路径。
+
+### 扩展 Story 划分
+
+| Story | 说明 | 依赖 |
+|---|---|---|
+| S11 | 定义 `IntentContract` 并修正 `audit` flow 不一致 | S3-S5 |
+| S12 | 新增 `/wp-audit`、`/wp-evolve`、`/wp-orchestrate` | S11 |
+| S13 | 实现 audit/evolve/orchestrate runtime handler | S12 |
+| S14 | 新增 agent role schema 与 role registry | S2 |
+| S15 | 新增 `test-scenario-generator` agent | S14 |
+| S16 | 实现 agent team planner 和 team-plan evidence | S14-S15 |
+| S17 | 扩展 doctor 的 host isolation 检查 | S9 |
+| S18 | 增加 OpenCode compatibility matrix 与 reload guidance | S17 |
+| S19 | 实现 target host reload smoke fixture | S6-S9 |
+| S20 | 实现 target command/plugin 真实发现校验 | S19 |
+| S21 | 新增 release build 脚本与清洗规则 | S1-S9 |
+| S22 | 增加 release manifest 与 checksum 校验 | S21 |
+| S23 | 为 spec/manifest/run-state/install manifest 增加 schema version | S5-S8 |
+| S24 | 新增 migration engine 与迁移报告 | S23 |
+| S25 | 为 managed apply 增加 lock、rollback、idempotent diff | S7 |
+| S26 | 建立统一 error code registry | S8-S9 |
+| S27 | 增加 permission/privacy policy 与日志脱敏 | S26 |
+| S28 | 补充 deep validators 与 clarification review | S8 |
+| S29 | 补充 golden fixtures 与 CI 回归入口 | S19-S28 |
+| S30 | 建立 capability parity matrix 并接入 docs | S11-S29 |

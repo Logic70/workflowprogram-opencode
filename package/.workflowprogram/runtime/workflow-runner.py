@@ -16,6 +16,8 @@ from runtime_common import (
     MANDATORY_DESIGN_FILES,
     MANDATORY_RUNTIME_FILES,
     MANDATORY_TARGET_FILES,
+    PRODUCT_INTENT_CONTRACT,
+    SCHEMA_VERSION,
     STAGE_SLOTS,
     DevelopRequest,
     aggregate_verdicts,
@@ -188,6 +190,7 @@ def _bootstrap_run(run: RunContext) -> None:
     write_json(
         run_root / "state.json",
         {
+            "schema_version": SCHEMA_VERSION,
             "intent": run.intent,
             "run_id": run.run_id,
             "run_root": run.run_root,
@@ -410,6 +413,14 @@ def _write_diagnostic_artifacts(run: RunContext, package_root: Path, target_root
     }
 
 
+def _write_team_plan(run: RunContext) -> dict[str, str]:
+    planner_module = _load_runtime_module("agent-team-planner.py", "workflowprogram_agent_team_planner")
+    team_plan = planner_module.plan_team(Path(run.package.package_root), run.intent)
+    team_plan_path = Path(run.run_root) / "outputs" / "team-plan.json"
+    write_json(team_plan_path, team_plan)
+    return {"team_plan": str(team_plan_path)}
+
+
 def _build_workflow_spec(
     run: RunContext,
     request: DevelopRequest,
@@ -457,6 +468,7 @@ def _build_workflow_spec(
         runtime_capabilities.append("target_plugin_bridge")
 
     return {
+        "schema_version": SCHEMA_VERSION,
         "meta": {
             "name": request.spec_name,
             "version": "1.0.0",
@@ -513,6 +525,10 @@ def _build_workflow_spec(
             "audit": {
                 "required_stage_slots": ["S5"],
                 "optional_stage_slots": ["S6"],
+            },
+            "evolve": {
+                "required_stage_slots": ["S2", "S3", "S4", "S5", "S6"],
+                "optional_stage_slots": [],
             },
         },
         "registry": {
@@ -780,6 +796,7 @@ export const TargetWorkflowPlugin = async (context) => {{
 
 def _runtime_manifest(spec: dict[str, Any]) -> dict[str, Any]:
     return {
+        "schema_version": SCHEMA_VERSION,
         "workflow_name": spec["meta"]["name"],
         "generated_at": iso_now(),
         "runtime_capabilities": spec["generated_runtime_contract"]["runtime_capabilities"],
@@ -898,6 +915,7 @@ def _run_mutation_intent(
     run_root = Path(run.run_root)
     target_root_path = Path(run.target.target_root)
     diagnostic_outputs = _write_diagnostic_artifacts(run, Path(run.package.package_root), target_root_path)
+    team_plan_outputs = _write_team_plan(run)
     existing_spec = _load_existing_spec(target_root_path)
     latest_run = _latest_prior_run(target_root_path, run_root)
     request = parse_user_arguments(user_arguments, target_root_path.name)
@@ -909,8 +927,9 @@ def _run_mutation_intent(
         "develop": "Requirements normalized into a develop request.",
         "hotfix": "Hotfix request normalized against the existing target workflow.",
         "iterate": "Iterate request normalized using existing target workflow context.",
+        "evolve": "Evolve request normalized using existing target workflow evidence.",
     }
-    request_outputs: dict[str, Any] = {"summary": request.summary}
+    request_outputs: dict[str, Any] = {"summary": request.summary, "team_plan": team_plan_outputs}
     if inherited_identity:
         request_outputs["inherited_identity"] = inherited_identity
     if latest_run:
@@ -960,6 +979,7 @@ def _run_mutation_intent(
         "develop": "Target root context scanned.",
         "hotfix": "Existing target workflow context scanned for hotfix.",
         "iterate": "Existing target workflow context scanned for iterate.",
+        "evolve": "Existing target workflow context scanned for evolve.",
     }
     existing_assets["diagnostic_outputs"] = diagnostic_outputs
     if clarification_package:
@@ -1128,6 +1148,7 @@ def _run_mutation_intent(
         "develop": "Target workflow bundle generated and applied.",
         "hotfix": "Existing target workflow updated through the managed hotfix flow.",
         "iterate": "Existing target workflow iterated and reapplied.",
+        "evolve": "Existing target workflow evolved through managed apply.",
     }
     return {
         "intent": intent,
@@ -1173,10 +1194,21 @@ def run_iterate(package_root: Path, target_root: Path, user_arguments: str) -> d
     )
 
 
+def run_evolve(package_root: Path, target_root: Path, user_arguments: str) -> dict[str, Any]:
+    return _run_mutation_intent(
+        "evolve",
+        package_root,
+        target_root,
+        user_arguments,
+        require_existing_spec=True,
+    )
+
+
 def run_validate(package_root: Path, target_root: Path, user_arguments: str) -> dict[str, Any]:
     run = _build_contexts(package_root, target_root, "validate", user_arguments)
     _bootstrap_run(run)
     diagnostic_outputs = _write_diagnostic_artifacts(run, Path(run.package.package_root), Path(run.target.target_root))
+    team_plan_outputs = _write_team_plan(run)
 
     write_json(
         Path(run.run_root) / "outputs" / "stages" / "runner-summary.json",
@@ -1192,7 +1224,7 @@ def run_validate(package_root: Path, target_root: Path, user_arguments: str) -> 
         "validate",
         "PASS",
         "Validation pipeline entered.",
-        outputs={"target_root": run.target.target_root, "diagnostic_outputs": diagnostic_outputs},
+        outputs={"target_root": run.target.target_root, "diagnostic_outputs": diagnostic_outputs, "team_plan": team_plan_outputs},
     )
     validation_summary = run_validation_layers(
         package_root=Path(run.package.package_root),
@@ -1233,6 +1265,128 @@ def run_validate(package_root: Path, target_root: Path, user_arguments: str) -> 
     }
 
 
+def run_audit(package_root: Path, target_root: Path, user_arguments: str) -> dict[str, Any]:
+    run = _build_contexts(package_root, target_root, "audit", user_arguments)
+    _bootstrap_run(run)
+
+    target_root_path = Path(run.target.target_root)
+    run_root = Path(run.run_root)
+    diagnostic_outputs = _write_diagnostic_artifacts(run, Path(run.package.package_root), target_root_path)
+    team_plan_outputs = _write_team_plan(run)
+    latest_run = _latest_prior_run(target_root_path, run_root)
+    existing_assets = _collect_existing_assets(target_root_path)
+    if latest_run:
+        existing_assets["latest_prior_run"] = latest_run
+    existing_assets["diagnostic_outputs"] = diagnostic_outputs
+    _write_stage_summary(
+        run,
+        "S1",
+        "audit-request",
+        "PASS",
+        "Audit request captured.",
+        outputs={"user_arguments": user_arguments, "latest_prior_run": latest_run, "team_plan": team_plan_outputs},
+    )
+    _write_stage_summary(
+        run,
+        "S2",
+        "audit-context",
+        "PASS" if existing_assets["existing_workflow_spec"] else "WARN",
+        (
+            "Existing generated target workflow detected for audit."
+            if existing_assets["existing_workflow_spec"]
+            else "No generated target workflow detected; audit is limited to package and host diagnostics."
+        ),
+        outputs=existing_assets,
+    )
+
+    if existing_assets["existing_workflow_spec"]:
+        validation_summary = run_validation_layers(
+            package_root=Path(run.package.package_root),
+            target_root=target_root_path,
+            run_root=run_root,
+        )
+    else:
+        package_result = validate_package_contract(Path(run.package.package_root))
+        validation_summary = {
+            "verdict": "WARN" if package_result["verdict"] == "PASS" else "FAIL",
+            "layers": {
+                "package": package_result,
+                "spec": _placeholder_layer("workflow_spec_validator", "WARN", "No target workflow spec present yet."),
+                "target": _placeholder_layer("target_bundle_validator", "WARN", "No target bundle present yet."),
+                "run_state": _placeholder_layer("run_state_validator", "PASS", "Audit run-state initialized."),
+            },
+            "exit_code": 0 if package_result["verdict"] == "PASS" else 1,
+        }
+        _write_validation_artifacts(run_root, validation_summary)
+
+    judge_summary = _run_s5_judge(run_root, validation_summary)
+    audit_report = {
+        "schema_version": SCHEMA_VERSION,
+        "intent": "audit",
+        "target_root": run.target.target_root,
+        "latest_prior_run": latest_run,
+        "existing_assets": existing_assets,
+        "validation_verdict": validation_summary["verdict"],
+        "judge_verdict": judge_summary["verdict"],
+        "diagnostics": diagnostic_outputs,
+    }
+    write_json(run_root / "outputs" / "audit-report.json", audit_report)
+    write_text(
+        run_root / "outputs" / "audit-report.md",
+        "\n".join(
+            [
+                "# WorkflowProgram Audit Report",
+                "",
+                f"- Verdict: `{judge_summary['verdict']}`",
+                f"- Target workflow present: `{existing_assets['existing_workflow_spec']}`",
+                f"- Validation verdict: `{validation_summary['verdict']}`",
+                f"- Latest prior run: `{latest_run['run_id'] if latest_run else 'none'}`",
+                "",
+            ]
+        ),
+    )
+    _write_stage_summary(
+        run,
+        "S5",
+        "audit-validate",
+        judge_summary["verdict"],
+        "Audit validation completed.",
+        outputs={
+            "validation_path": str(run_root / "validation-summary.json"),
+            "audit_report": str(run_root / "outputs" / "audit-report.json"),
+        },
+    )
+    _write_stage_summary(
+        run,
+        "S6",
+        "audit-summary",
+        "PASS" if judge_summary["verdict"] != "FAIL" else "FAIL",
+        "Audit summary emitted.",
+        outputs={"audit_report": str(run_root / "outputs" / "audit-report.md")},
+    )
+    _set_terminal_state(
+        run,
+        judge_summary["verdict"],
+        judge_summary.get("failure_kind"),
+        "Audit pipeline completed.",
+        diagnostics=diagnostic_outputs,
+        validation=validation_summary,
+        judge=judge_summary,
+        audit_report=str(run_root / "outputs" / "audit-report.json"),
+    )
+    return {
+        "intent": "audit",
+        "verdict": judge_summary["verdict"],
+        "summary": "Audit completed without mutating target assets.",
+        "run_root": run.run_root,
+        "diagnostics": diagnostic_outputs,
+        "validation": validation_summary,
+        "judge": judge_summary,
+        "audit_report": str(run_root / "outputs" / "audit-report.json"),
+        "exit_code": 0 if judge_summary["verdict"] != "FAIL" else 1,
+    }
+
+
 def run_preflight(package_root: Path, target_root: Path, user_arguments: str) -> dict[str, Any]:
     run = _build_contexts(package_root, target_root, "preflight", user_arguments)
     _bootstrap_run(run)
@@ -1240,6 +1394,7 @@ def run_preflight(package_root: Path, target_root: Path, user_arguments: str) ->
     target_root_path = Path(run.target.target_root)
     run_root = Path(run.run_root)
     diagnostic_outputs = _write_diagnostic_artifacts(run, Path(run.package.package_root), target_root_path)
+    team_plan_outputs = _write_team_plan(run)
     latest_run = _latest_prior_run(target_root_path, run_root)
     _write_stage_summary(
         run,
@@ -1247,7 +1402,7 @@ def run_preflight(package_root: Path, target_root: Path, user_arguments: str) ->
         "preflight-request",
         "PASS",
         "Preflight request captured.",
-        outputs={"user_arguments": user_arguments, "latest_prior_run": latest_run, "diagnostic_outputs": diagnostic_outputs},
+        outputs={"user_arguments": user_arguments, "latest_prior_run": latest_run, "diagnostic_outputs": diagnostic_outputs, "team_plan": team_plan_outputs},
     )
 
     existing_assets = _collect_existing_assets(target_root_path)
@@ -1341,6 +1496,7 @@ def run_ship(package_root: Path, target_root: Path, user_arguments: str) -> dict
     target_root_path = Path(run.target.target_root)
     run_root = Path(run.run_root)
     diagnostic_outputs = _write_diagnostic_artifacts(run, Path(run.package.package_root), target_root_path)
+    team_plan_outputs = _write_team_plan(run)
     latest_run = _latest_prior_run(target_root_path, run_root)
     _write_stage_summary(
         run,
@@ -1348,7 +1504,7 @@ def run_ship(package_root: Path, target_root: Path, user_arguments: str) -> dict
         "ship-request",
         "PASS",
         "Ship request captured.",
-        outputs={"user_arguments": user_arguments, "latest_prior_run": latest_run, "diagnostic_outputs": diagnostic_outputs},
+        outputs={"user_arguments": user_arguments, "latest_prior_run": latest_run, "diagnostic_outputs": diagnostic_outputs, "team_plan": team_plan_outputs},
     )
 
     existing_assets = _collect_existing_assets(target_root_path)
@@ -1439,6 +1595,84 @@ def run_ship(package_root: Path, target_root: Path, user_arguments: str) -> dict
     }
 
 
+def run_orchestrate(package_root: Path, target_root: Path, user_arguments: str) -> dict[str, Any]:
+    run = _build_contexts(package_root, target_root, "orchestrate", user_arguments)
+    _bootstrap_run(run)
+    run_root = Path(run.run_root)
+    diagnostic_outputs = _write_diagnostic_artifacts(run, Path(run.package.package_root), Path(run.target.target_root))
+    team_plan_outputs = _write_team_plan(run)
+    route_module = _load_runtime_module("route-intent.py", "workflowprogram_route_intent")
+    route = route_module.route_request(user_arguments)
+    selected_intent = str(route.get("intent", "develop"))
+    selected_contract = PRODUCT_INTENT_CONTRACT.get(selected_intent, {})
+    mutating = bool(selected_contract.get("mutating"))
+    needs_clarification = bool(route.get("ambiguous")) or float(route.get("confidence", 0.0)) < 0.7
+    execute_allowed = False
+    verdict = "WARN" if needs_clarification or mutating else "PASS"
+    summary = (
+        "Route requires clarification before execution."
+        if needs_clarification
+        else (
+            "Mutating intent selected; run the recommended command explicitly."
+            if mutating
+            else "Read-only intent selected; run the recommended command explicitly."
+        )
+    )
+    routing_result = {
+        "schema_version": SCHEMA_VERSION,
+        "request": user_arguments,
+        "route": route,
+        "selected_intent": selected_intent,
+        "entry_command": route.get("entry_command"),
+        "mutating": mutating,
+        "needs_clarification": needs_clarification,
+        "execute_allowed": execute_allowed,
+        "summary": summary,
+    }
+    write_json(run_root / "outputs" / "orchestrate-route.json", routing_result)
+    write_text(
+        run_root / "outputs" / "orchestrate-route.md",
+        "\n".join(
+            [
+                "# WorkflowProgram Route",
+                "",
+                f"- Selected intent: `{selected_intent}`",
+                f"- Entry command: `{route.get('entry_command')}`",
+                f"- Confidence: `{route.get('confidence')}`",
+                f"- Ambiguous: `{route.get('ambiguous')}`",
+                f"- Mutating: `{mutating}`",
+                f"- Action: {summary}",
+                "",
+            ]
+        ),
+    )
+    _write_stage_summary(
+        run,
+        "S1",
+        "orchestrate-route",
+        verdict,
+        summary,
+        outputs={"route": routing_result, "diagnostic_outputs": diagnostic_outputs, "team_plan": team_plan_outputs},
+    )
+    _set_terminal_state(
+        run,
+        verdict,
+        None,
+        "Orchestrate routing completed.",
+        diagnostics=diagnostic_outputs,
+        route=routing_result,
+    )
+    return {
+        "intent": "orchestrate",
+        "verdict": verdict,
+        "summary": summary,
+        "run_root": run.run_root,
+        "diagnostics": diagnostic_outputs,
+        "route": routing_result,
+        "exit_code": 0,
+    }
+
+
 def run_intent(intent: str, package_root: Path, target_root: Path, user_arguments: str) -> dict[str, Any]:
     handlers = {
         "develop": run_develop,
@@ -1446,7 +1680,10 @@ def run_intent(intent: str, package_root: Path, target_root: Path, user_argument
         "preflight": run_preflight,
         "hotfix": run_hotfix,
         "iterate": run_iterate,
+        "evolve": run_evolve,
         "ship": run_ship,
+        "audit": run_audit,
+        "orchestrate": run_orchestrate,
     }
     if intent not in handlers:
         raise ValueError(f"Unsupported intent: {intent}")

@@ -21,6 +21,7 @@ from runtime_common import (  # noqa: E402
     PACKAGE_COMMAND_PREFIX,
     PACKAGE_PLUGIN_FILE,
     REQUIRED_PACKAGE_COMMANDS,
+    SCHEMA_VERSION,
     default_global_config_root,
     detect_package_layout,
     ensure_dir,
@@ -34,6 +35,7 @@ from runtime_common import (  # noqa: E402
 BACKUP_CONFIG_PATH = ".workflowprogram/package/opencode.json.backup"
 VENV_RELATIVE_PATH = ".workflowprogram/package/.venv"
 REQUIREMENTS_FILE = "requirements.txt"
+REQUIREMENTS_LOCK_FILE = "requirements.lock.txt"
 
 
 def _read_json_file(path: Path) -> dict[str, Any]:
@@ -181,6 +183,7 @@ def _plan_install(source_root: Path, install_root: Path, mode: str) -> dict[str,
         "backup_config_path": install_root / BACKUP_CONFIG_PATH,
         "venv_root": _venv_root(install_root),
         "requirements_relative": str((runtime_dest_root / REQUIREMENTS_FILE).relative_to(install_root).as_posix()),
+        "requirements_lock_relative": str((runtime_dest_root / REQUIREMENTS_LOCK_FILE).relative_to(install_root).as_posix()),
     }
 
 
@@ -242,6 +245,7 @@ def install_package(
     create_venv: bool = False,
     python_executable: str | None = None,
     force: bool = False,
+    use_lock: bool = False,
 ) -> dict[str, Any]:
     source_root = source_package_root.resolve()
     install_root = _resolve_install_root(mode, target_root)
@@ -300,11 +304,12 @@ def install_package(
 
     selected_python = python_executable or sys.executable
     venv_info: dict[str, Any] | None = None
+    requirements_relative = plan["requirements_lock_relative"] if use_lock else plan["requirements_relative"]
     if create_venv:
         provisioned, venv_info = _provision_venv(
             base_python=selected_python,
             venv_root=plan["venv_root"],
-            requirements_path=install_root / plan["requirements_relative"],
+            requirements_path=install_root / requirements_relative,
         )
         if not provisioned:
             return {
@@ -323,6 +328,7 @@ def install_package(
         selected_python = str(_venv_python(plan["venv_root"]))
 
     manifest = {
+        "schema_version": SCHEMA_VERSION,
         "installed_at": iso_now(),
         "mode": mode,
         "source_package_root": str(source_root),
@@ -340,7 +346,8 @@ def install_package(
             [str(plan["venv_root"].relative_to(install_root).as_posix())] if create_venv else []
         ),
         "required_package_commands": list(REQUIRED_PACKAGE_COMMANDS),
-        "requirements_relative": plan["requirements_relative"],
+        "requirements_relative": requirements_relative,
+        "requirements_mode": "lock" if use_lock else "range",
         "create_venv": create_venv,
         "venv_root": (
             str(plan["venv_root"].relative_to(install_root).as_posix()) if create_venv else None
@@ -506,6 +513,7 @@ def build_parser() -> argparse.ArgumentParser:
     install_parser.add_argument("--create-venv", action="store_true", help="Create a package-local Python venv and install runtime dependencies")
     install_parser.add_argument("--python", help="Base Python interpreter to use for venv creation or fallback runtime execution")
     install_parser.add_argument("--force", action="store_true", help="Overwrite unmanaged reserved package paths")
+    install_parser.add_argument("--use-lock", action="store_true", help="Install Python dependencies from requirements.lock.txt when creating a venv")
     install_parser.add_argument("--json", action="store_true")
 
     uninstall_parser = subparsers.add_parser("uninstall", help="Remove a previously installed WorkflowProgram package")
@@ -535,6 +543,7 @@ def main() -> int:
             create_venv=args.create_venv,
             python_executable=args.python,
             force=args.force,
+            use_lock=args.use_lock,
         )
     elif args.action == "uninstall":
         result = uninstall_package(mode=args.mode, target_root=args.target_root)

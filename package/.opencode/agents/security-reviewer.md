@@ -2,6 +2,12 @@
 description: Review WorkflowProgram changes for high-confidence security issues in commands, runtime, and generated assets
 mode: subagent
 temperature: 0.1
+workflowprogram_role: security-reviewer
+workflowprogram_stage_affinity: [audit, ship]
+workflowprogram_capabilities: [security-review, permission-review, secret-leak-review]
+workflowprogram_trigger: on-security-review-required
+workflowprogram_priority: 80
+workflowprogram_fan_in: required
 permission:
   edit: deny
   bash: ask

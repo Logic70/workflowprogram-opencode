@@ -8,5 +8,6 @@ __pycache__/
 package/.workflowprogram/package/
 package/.workflowprogram/runs/
 package/.workflowprogram/design/
+dist/
 
 *.log

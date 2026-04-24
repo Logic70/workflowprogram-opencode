@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from runtime_common import append_jsonl, iso_now, read_json, sha256_file, write_json, write_text
+from runtime_common import SCHEMA_VERSION, append_jsonl, iso_now, read_json, sha256_file, write_json, write_text
 
 
 ALLOWED_MANAGED_PREFIXES = (
@@ -49,9 +49,14 @@ def manifest_path_for(target_root: Path) -> Path:
     return target_root / ".workflowprogram" / "managed-files.json"
 
 
+def lock_path_for(target_root: Path) -> Path:
+    return target_root / ".workflowprogram" / "managed-apply.lock"
+
+
 def load_manifest(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {
+            "schema_version": SCHEMA_VERSION,
             "manifest_version": 1,
             "updated_at": None,
             "entries": [],
@@ -190,6 +195,7 @@ def plan_payload(target_root: Path, source_root: Path, run_root: Path, producer_
     decisions = _decide_candidates(target_root, source_root, manifest)
     summary = _summarize(decisions)
     return {
+        "schema_version": SCHEMA_VERSION,
         "generated_at": iso_now(),
         "target_root": str(target_root),
         "source_root": str(source_root),
@@ -264,40 +270,130 @@ def _emit_event(run_root: Path, event_type: str, status: str, message: str, **ex
     )
 
 
+def _acquire_lock(target_root: Path, run_root: Path) -> tuple[bool, dict[str, Any]]:
+    lock_path = lock_path_for(target_root)
+    if lock_path.exists():
+        try:
+            existing = read_json(lock_path)
+        except Exception:
+            existing = {"error": "unreadable-lock", "path": str(lock_path)}
+        if existing.get("run_root") != str(run_root):
+            return False, existing
+    lock_payload = {
+        "schema_version": SCHEMA_VERSION,
+        "run_root": str(run_root),
+        "target_root": str(target_root),
+        "locked_at": iso_now(),
+    }
+    write_json(lock_path, lock_payload)
+    return True, lock_payload
+
+
+def _release_lock(target_root: Path, run_root: Path) -> None:
+    lock_path = lock_path_for(target_root)
+    if not lock_path.exists():
+        return
+    try:
+        existing = read_json(lock_path)
+    except Exception:
+        return
+    if existing.get("run_root") == str(run_root):
+        lock_path.unlink()
+
+
+def _backup_target(run_root: Path, relative_path: str, target_path: Path) -> dict[str, Any] | None:
+    if not target_path.exists():
+        return None
+    backup_path = run_root / "outputs" / "rollback" / relative_path
+    backup_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(target_path, backup_path)
+    return {
+        "relative_path": relative_path,
+        "target_path": str(target_path),
+        "backup_path": str(backup_path),
+        "target_sha256": sha256_file(target_path),
+    }
+
+
 def apply_staged(target_root: Path, source_root: Path, run_root: Path, producer_version: str) -> tuple[dict[str, Any], dict[str, Any]]:
     ensure_candidate_root(source_root)
     plan = plan_payload(target_root, source_root, run_root, producer_version)
     manifest = load_manifest(manifest_path_for(target_root))
+    lock_acquired, lock_payload = _acquire_lock(target_root, run_root)
+    if not lock_acquired:
+        result = {
+            "schema_version": SCHEMA_VERSION,
+            "generated_at": iso_now(),
+            "target_root": str(target_root),
+            "source_root": str(source_root),
+            "run_root": str(run_root),
+            "producer_version": producer_version,
+            "status": "locked",
+            "summary": plan["summary"],
+            "applied": [],
+            "conflicts": [
+                {
+                    "relative_path": ".workflowprogram/managed-apply.lock",
+                    "reason": "Another managed apply lock is active.",
+                    "lock": lock_payload,
+                }
+            ],
+            "lock": lock_payload,
+            "rollback_manifest": None,
+            "manifest_path": str(manifest_path_for(target_root)),
+        }
+        write_json(run_root / "outputs" / "managed-change-plan.json", plan)
+        write_json(run_root / "outputs" / "managed-change-result.json", result)
+        _write_markdown_summary(run_root / "outputs" / "managed-change-summary.md", result)
+        return plan, result
 
     applied: list[dict[str, Any]] = []
     conflicts: list[dict[str, Any]] = []
+    rollback_entries: list[dict[str, Any]] = []
 
-    for item in plan["entries"]:
-        source_path = Path(item["source_path"])
-        target_path = Path(item["target_path"])
-        if item["decision"] in {"create", "update"}:
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source_path, target_path)
-            applied_item = {
-                "relative_path": item["relative_path"],
-                "action": item["decision"],
-                "target_path": item["target_path"],
-                "applied_sha256": sha256_file(target_path),
-            }
-            applied.append(applied_item)
-            _emit_event(run_root, "ManagedAssetApplied", "ok", f"Applied {item['relative_path']}")
-        elif item["decision"] == "noop":
-            _emit_event(run_root, "ManagedAssetNoop", "ok", f"No change for {item['relative_path']}")
-        else:
-            conflict_copy = _copy_conflict(run_root, item["relative_path"], source_path)
-            conflict_item = {**item, "conflict_copy": conflict_copy}
-            conflicts.append(conflict_item)
-            _emit_event(run_root, "ManagedAssetConflict", "warn", f"Conflict on {item['relative_path']}")
+    try:
+        for item in plan["entries"]:
+            source_path = Path(item["source_path"])
+            target_path = Path(item["target_path"])
+            if item["decision"] in {"create", "update"}:
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                backup = _backup_target(run_root, item["relative_path"], target_path)
+                if backup:
+                    rollback_entries.append(backup)
+                shutil.copy2(source_path, target_path)
+                applied_item = {
+                    "relative_path": item["relative_path"],
+                    "action": item["decision"],
+                    "target_path": item["target_path"],
+                    "applied_sha256": sha256_file(target_path),
+                }
+                applied.append(applied_item)
+                _emit_event(run_root, "ManagedAssetApplied", "ok", f"Applied {item['relative_path']}")
+            elif item["decision"] == "noop":
+                _emit_event(run_root, "ManagedAssetNoop", "ok", f"No change for {item['relative_path']}")
+            else:
+                conflict_copy = _copy_conflict(run_root, item["relative_path"], source_path)
+                conflict_item = {**item, "conflict_copy": conflict_copy}
+                conflicts.append(conflict_item)
+                _emit_event(run_root, "ManagedAssetConflict", "warn", f"Conflict on {item['relative_path']}")
 
-    manifest = _update_manifest(manifest, applied, run_root, producer_version)
-    save_manifest(manifest_path_for(target_root), manifest)
+        manifest = _update_manifest(manifest, applied, run_root, producer_version)
+        save_manifest(manifest_path_for(target_root), manifest)
+    finally:
+        _release_lock(target_root, run_root)
+
+    rollback_manifest = {
+        "schema_version": SCHEMA_VERSION,
+        "generated_at": iso_now(),
+        "target_root": str(target_root),
+        "run_root": str(run_root),
+        "entries": rollback_entries,
+    }
+    rollback_manifest_path = run_root / "outputs" / "rollback-manifest.json"
+    write_json(rollback_manifest_path, rollback_manifest)
 
     result = {
+        "schema_version": SCHEMA_VERSION,
         "generated_at": iso_now(),
         "target_root": str(target_root),
         "source_root": str(source_root),
@@ -307,6 +403,8 @@ def apply_staged(target_root: Path, source_root: Path, run_root: Path, producer_
         "summary": plan["summary"],
         "applied": applied,
         "conflicts": conflicts,
+        "lock": lock_payload,
+        "rollback_manifest": str(rollback_manifest_path),
         "manifest_path": str(manifest_path_for(target_root)),
     }
 

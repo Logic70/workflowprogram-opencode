@@ -1,0 +1,25 @@
+schema_version: opencode-v2.1
+write_policy:
+  read_only_intents:
+    - validate
+    - preflight
+    - ship
+    - audit
+    - orchestrate
+  mutating_intents:
+    - develop
+    - hotfix
+    - iterate
+    - evolve
+  required_write_mechanism: managed-apply
+shell_policy:
+  package_commands_may_call_runtime: true
+  target_commands_may_call_target_runtime: true
+  direct_target_writes_from_command_body: false
+privacy_policy:
+  redact_environment_keys_containing:
+    - TOKEN
+    - API_KEY
+    - SECRET
+    - PASSWORD
+  redact_provider_output: best-effort

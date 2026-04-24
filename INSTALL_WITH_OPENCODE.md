@@ -15,6 +15,7 @@
 - 不要凭空猜测路径，先确认当前工作目录和源包路径是否存在。
 - 优先创建 package 专用 `venv`。
 - 安装完成后必须执行 `status` 校验。
+- 安装或更新插件后，提醒用户重启 OpenCode 或重新打开项目。
 - 如果安装失败，直接报告失败原因，不要假设成功。
 - 除本文档明确要求的命令外，不要额外修改其它文件。
 
@@ -74,11 +75,15 @@ python3 /mnt/d/Code/WorkflowProgram-CN/opencode-v2/package/.workflowprogram/runt
   - `.opencode/agents/security-reviewer.md`
   - `.opencode/agents/performance-reviewer.md`
   - `.opencode/agents/style-reviewer.md`
+  - `.opencode/agents/test-scenario-generator.md`
+  - `.opencode/commands/wp-audit.md`
   - `.opencode/commands/wp-develop.md`
   - `.opencode/commands/wp-doctor.md`
+  - `.opencode/commands/wp-evolve.md`
   - `.opencode/commands/wp-preflight.md`
   - `.opencode/commands/wp-hotfix.md`
   - `.opencode/commands/wp-iterate.md`
+  - `.opencode/commands/wp-orchestrate.md`
   - `.opencode/commands/wp-ship.md`
   - `.opencode/commands/wp-validate.md`
   - `.opencode/plugins/workflowprogram.ts`
@@ -90,8 +95,9 @@ python3 /mnt/d/Code/WorkflowProgram-CN/opencode-v2/package/.workflowprogram/runt
 安装成功后，告诉用户：
 
 - 重新打开当前项目的 OpenCode 会话，或者刷新命令列表
-- 然后检查 `/wp-develop`、`/wp-doctor`、`/wp-preflight`、`/wp-hotfix`、`/wp-iterate`、`/wp-ship`、`/wp-validate` 是否出现
-- 如需使用 package agents，可检查 `@workflow-designer`、`@workflow-validator`、`@workflow-verifier` 等是否可见
+- 然后检查 `/wp-develop`、`/wp-doctor`、`/wp-preflight`、`/wp-hotfix`、`/wp-iterate`、`/wp-audit`、`/wp-evolve`、`/wp-orchestrate`、`/wp-ship`、`/wp-validate` 是否出现
+- 如需使用 package agents，可检查 `@workflow-designer`、`@workflow-validator`、`@workflow-verifier`、`@test-scenario-generator` 等是否可见
+- 如果 OpenCode 仍显示旧命令列表，重启 OpenCode 或重新打开当前项目
 
 ## 故障处理
 
@@ -114,3 +120,15 @@ python3 /mnt/d/Code/WorkflowProgram-CN/opencode-v2/package/.workflowprogram/runt
 
 - 报告缺失的命令、插件或 runtime 文件
 - 不要把安装标记为成功
+
+### 命令或 agent 被其它来源遮蔽
+
+- 执行 `/wp-doctor`
+- 检查 `DOC-08` 的来源路径
+- 不要自动删除全局 OpenCode、Claude 或 oh-my-opencode 资产
+- 把冲突路径和建议隔离方式报告给用户
+
+### 需要离线或锁定依赖安装
+
+- 如果用户明确要求锁定依赖，可在安装命令中追加 `--use-lock`
+- `--use-lock` 只在 `--create-venv` 时影响 Python 依赖安装

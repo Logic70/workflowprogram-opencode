@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 
 RUNTIME_DIR = Path(__file__).resolve().parents[1]
 if str(RUNTIME_DIR) not in sys.path:
@@ -18,10 +20,12 @@ from runtime_common import (  # noqa: E402
     INSTALL_MANIFEST_PATH,
     PACKAGE_COMMAND_PREFIX,
     PACKAGE_PLUGIN_ID,
+    PRODUCT_INTENT_CONTRACT,
     REQUIRED_PACKAGE_AGENTS,
     REQUIRED_PACKAGE_COMMANDS,
     detect_package_layout,
 )
+from error_codes import code_for, remediation_for  # noqa: E402
 
 
 REQUIRED_VALIDATORS = (
@@ -29,6 +33,14 @@ REQUIRED_VALIDATORS = (
     "workflow_spec_validator.py",
     "target_bundle_validator.py",
     "run_state_validator.py",
+)
+REQUIRED_AGENT_METADATA = (
+    "workflowprogram_role",
+    "workflowprogram_stage_affinity",
+    "workflowprogram_capabilities",
+    "workflowprogram_trigger",
+    "workflowprogram_priority",
+    "workflowprogram_fan_in",
 )
 
 
@@ -42,7 +54,20 @@ def _build_check(check_id: str, passed: bool, detail: str, category: str) -> dic
         "passed": passed,
         "detail": detail,
         "category": category,
+        "error_code": None if passed else code_for(category, check_id),
+        "remediation": None if passed else remediation_for(category),
     }
+
+
+def _agent_frontmatter(path: Path) -> dict[str, Any]:
+    text = path.read_text(encoding="utf-8")
+    if not text.startswith("---"):
+        return {}
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        return {}
+    payload = yaml.safe_load(parts[1]) or {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def validate_package_contract(package_root: Path) -> dict[str, Any]:
@@ -144,6 +169,21 @@ def validate_package_contract(package_root: Path) -> dict[str, Any]:
         )
     )
 
+    permission_policy = runtime_dir / "permission-policy.yaml"
+    permission_policy_ok = False
+    if permission_policy.is_file():
+        policy = yaml.safe_load(permission_policy.read_text(encoding="utf-8")) or {}
+        privacy_policy = policy.get("privacy_policy", {}) if isinstance(policy, dict) else {}
+        permission_policy_ok = bool(privacy_policy.get("redact_environment_keys_containing"))
+    checks.append(
+        _build_check(
+            "SEC-01",
+            permission_policy_ok,
+            f"permission_policy={permission_policy}",
+            "privacy",
+        )
+    )
+
     plugin_id_ok = False
     if plugin_file.is_file():
         plugin_id_ok = PACKAGE_PLUGIN_ID in plugin_file.read_text(encoding="utf-8")
@@ -188,6 +228,50 @@ def validate_package_contract(package_root: Path) -> dict[str, Any]:
             not missing_agents,
             f"required_agents={list(REQUIRED_PACKAGE_AGENTS)} missing_agents={missing_agents}",
             "package_contract",
+        )
+    )
+
+    malformed_agents: list[str] = []
+    for agent_path in agent_files:
+        frontmatter = _agent_frontmatter(agent_path)
+        missing_metadata = [key for key in REQUIRED_AGENT_METADATA if key not in frontmatter]
+        role_matches = frontmatter.get("workflowprogram_role") == agent_path.stem
+        affinity_ok = isinstance(frontmatter.get("workflowprogram_stage_affinity"), list)
+        capabilities_ok = isinstance(frontmatter.get("workflowprogram_capabilities"), list)
+        priority_ok = isinstance(frontmatter.get("workflowprogram_priority"), int)
+        if missing_metadata or not role_matches or not affinity_ok or not capabilities_ok or not priority_ok:
+            malformed_agents.append(
+                f"{agent_path.name}:missing={missing_metadata},role_matches={role_matches}"
+            )
+    checks.append(
+        _build_check(
+            "AGT-01",
+            not malformed_agents,
+            f"malformed_agents={malformed_agents}",
+            "agent_contract",
+        )
+    )
+
+    runner_path = runtime_dir / "workflow-runner.py"
+    entry_path = runtime_dir / "workflow-entry.py"
+    runner_text = runner_path.read_text(encoding="utf-8") if runner_path.is_file() else ""
+    intent_contract_ok = True
+    intent_details: list[str] = []
+    for intent, contract in PRODUCT_INTENT_CONTRACT.items():
+        command_name = str(contract["command"])
+        command_present = command_name in package_command_stems
+        handler_present = f"run_{intent}" in runner_text
+        if not command_present or not handler_present:
+            intent_contract_ok = False
+        intent_details.append(
+            f"{intent}:command={command_present},handler={handler_present},mutating={contract['mutating']}"
+        )
+    checks.append(
+        _build_check(
+            "INT-01",
+            intent_contract_ok and entry_path.is_file(),
+            "; ".join(intent_details),
+            "intent_contract",
         )
     )
 

@@ -10,7 +10,7 @@
 
 目标是把 OpenCode v2 从“设计成立”推进到“最小可运行产品包成立”，并确保实施顺序与契约分层一致。
 
-本文档只规划 v1：
+本文档先规划 v1 核心链路，并在第 10 章补充后续能力闭环计划：
 
 - OpenCode only
 - `source-as-deployment-source`
@@ -22,7 +22,6 @@
 
 - Claude 兼容实现
 - marketplace / npm 发布
-- `dist/opencode/` 打包链
 - 多宿主抽象框架
 
 ## 2. 实施目标
@@ -38,6 +37,12 @@ v1 实施目标如下：
 | IP-05 | 能生成最小 target bundle | 至少交付 `.workflowprogram/design/*` 与 `.workflowprogram/runtime/*` |
 | IP-06 | 校验分层落地 | Package/Spec/Target/Run-State validator 均可执行 |
 | IP-07 | smoke 最小闭环成立 | 安装、package load、develop、generate/apply smoke 可执行 |
+| IP-08 | 生命周期入口闭合 | `audit/evolve/orchestrate` 与 command/runtime/spec flow 一致 |
+| IP-09 | agentteam 编排可验证 | package agent role schema、team plan、fan-in evidence 可校验 |
+| IP-10 | 宿主隔离可诊断 | 能识别外部 OpenCode/Claude/oh-my-opencode 资产串入与版本/reload 风险 |
+| IP-11 | target host reload 可验证 | 能区分 package host smoke 与 target host reload smoke |
+| IP-12 | release artifact 可复现 | 能生成干净 `dist/opencode/` 或 archive 并校验 manifest/checksum |
+| IP-13 | 契约硬化落地 | schema version、migration、error code、apply recovery、permission/privacy 策略进入 validator |
 
 ## 3. 实施边界
 
@@ -248,9 +253,9 @@ v1 实施目标如下：
 
 ### 后置项
 
-- target plugin 复杂模式
 - target host-visible agents / skills 扩展
-- packager / release 流程
+- marketplace / npm 发布流程
+- 多宿主抽象框架
 
 ## 6. 文件级实施清单
 
@@ -325,6 +330,154 @@ v1 实施目标如下：
 4. 完成 P4，形成最小 target bundle 与 managed apply
 5. 完成 P5，建立 `/wp-validate` 的分层校验能力
 6. 完成 P6，建立 smoke 闭环
+
+## 10. 能力差距闭环实施计划
+
+本章对应 OpenSpec change：`openspec/changes/complete-opencode-parity-gap-closure`。这些任务不改变 v1 核心链路已经成立的判断，但用于补齐与 ClaudeCode 版相比仍缺失的 OpenCode-native 能力。
+
+### P7 生命周期入口闭合
+
+目标：
+
+- 消除 `audit` flow 已存在但产品命令与 runtime intent 不支持的不一致。
+- 增加 `evolve` 与 `orchestrate`，让用户不必记忆每个具体命令。
+
+任务：
+
+1. 定义 `IntentContract`
+2. 新增 `/wp-audit`、`/wp-evolve`、`/wp-orchestrate`
+3. 扩展 `SUPPORTED_PACKAGE_INTENTS`
+4. 实现 audit/evolve/orchestrate runtime handler
+5. 增加 command/runtime/spec flow 一致性测试
+
+验收：
+
+- `wp-*` command、runtime handler、spec `intent_flows` 无悬空项
+- `audit` 非变更，`evolve` 走 managed apply，`orchestrate` 低置信度时只澄清不变更
+
+### P8 agentteam 编排与角色 schema
+
+目标：
+
+- 把 package agents 从静态文件集合升级为可编排团队结构。
+- 明确 agentteam 与 subagent 的区别。
+
+任务：
+
+1. 定义 agent role schema
+2. 为现有 agents 增加角色元数据
+3. 新增 `test-scenario-generator`
+4. 实现 `agent-team-planner.py`
+5. 输出 `team-plan.json`、dispatch trace、fan-in report
+6. 增加 package validator 对 role registry 的校验
+
+验收：
+
+- 一个阶段可配置零个、一个或多个 agent
+- 多 reviewer 场景能生成 fan-in evidence
+- role 引用不存在时 validator fail
+
+### P9 宿主隔离与兼容诊断
+
+目标：
+
+- 解决 WSL/OpenCode 场景中非本项目 skills/agents/commands 被识别的问题。
+
+任务：
+
+1. doctor 增加 host source inventory
+2. 检测 project/global OpenCode 配置来源
+3. 检测 ClaudeCode 与 oh-my-opencode 资产串入
+4. 检测命名冲突与 shadowing
+5. 增加 OpenCode 版本/plugin API/reload guidance
+6. 增加 WSL/Windows 路径诊断
+
+验收：
+
+- doctor 能指出污染来源路径和风险类型
+- remediation 只给建议，不自动删除用户全局资产
+
+### P10 target host reload smoke
+
+目标：
+
+- 证明生成后的目标工作流能被 OpenCode host 发现，而不仅是 WorkflowProgram package 能被发现。
+
+任务：
+
+1. 定义 target host reload smoke contract
+2. 构造 target command fixture
+3. 构造 target plugin fixture
+4. 真实 OpenCode 可用时执行 host reload smoke
+5. 不可用时输出 `ENVIRONMENT-SKIP`
+6. deterministic fallback 只验证文件契约，不伪造 host PASS
+
+验收：
+
+- package host smoke 与 target host reload smoke 分开报告
+- provider/API 不可用不会导致假阳性
+
+### P11 release build 与安装生命周期
+
+目标：
+
+- 从开发目录安装升级为可发布、可复现、可验证的 release 产物。
+
+任务：
+
+1. 新增 `tools/build_package.py`
+2. 产出 `dist/opencode/` 或 archive
+3. 排除 runs、cache、node_modules、logs、secrets
+4. 写 release manifest 与 checksum
+5. 从 release artifact 跑 install smoke
+6. 补重复安装、升级、卸载、status 测试
+7. 补离线依赖锁定方案
+
+验收：
+
+- release 包不含本地运行痕迹
+- release artifact 可独立安装并通过 package validator
+
+### P12 契约硬化
+
+目标：
+
+- 让 schema、写入恢复、错误码、权限和隐私不只停留在文档约束。
+
+任务：
+
+1. 给 spec/manifest/run-state/install manifest 增加 `schema_version`
+2. 实现 migration engine 与 migration report
+3. managed apply 增加 lock、idempotent diff、rollback manifest
+4. 建立 error code registry
+5. 定义 permission policy
+6. 增加日志和证据脱敏
+
+验收：
+
+- validator 能识别 schema 不兼容、错误码缺失、敏感信息未脱敏
+- apply 中断后 doctor 能说明 recover/rollback 路径
+
+### P13 深度校验与 CI fixtures
+
+目标：
+
+- 补齐 ClaudeCode 版更细粒度的验证能力，并让回归测试更接近真实工作流。
+
+任务：
+
+1. 增加 workflow draft validator
+2. 增加 lowlevel design validator
+3. 增加 generated runtime validator
+4. 增加 lessons delta validator
+5. 增加 clarification review
+6. 增加 sequential、target command、target plugin 三类 golden fixtures
+7. 建立 CI 入口：`py_compile`、validator regression、install smoke、target host smoke、release integrity
+
+验收：
+
+- `/wp-validate` 或 `/wp-audit` 可选择执行 deep validation
+- CI 没有真实 OpenCode host 时只 skip host-dependent checks，不标记 PASS
 
 ## 9. 工作量估算
 

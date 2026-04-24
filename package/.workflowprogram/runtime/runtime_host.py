@@ -12,6 +12,8 @@ import subprocess
 import sys
 from typing import Any
 
+from privacy import redact_text
+
 
 VALID_RUNTIME_PROVIDERS = {"opencode_native", "fixture_host", "command_adapter"}
 
@@ -99,10 +101,10 @@ def invoke_runtime_host(
         return {
             "provider": provider,
             "verdict": "PASS" if proc.returncode == 0 else "FAIL",
-            "message": proc.stdout.strip() or proc.stderr.strip() or f"exit_code={proc.returncode}",
+            "message": redact_text(proc.stdout.strip() or proc.stderr.strip() or f"exit_code={proc.returncode}"),
             "command": command,
-            "stdout": proc.stdout,
-            "stderr": proc.stderr,
+            "stdout": redact_text(proc.stdout),
+            "stderr": redact_text(proc.stderr),
             "exit_code": proc.returncode,
         }
     command = ["opencode", "run"]
@@ -130,16 +132,16 @@ def invoke_runtime_host(
         return {
             "provider": provider,
             "verdict": verdict,
-            "message": proc.stdout.strip() or proc.stderr.strip() or f"exit_code={proc.returncode}",
+            "message": redact_text(proc.stdout.strip() or proc.stderr.strip() or f"exit_code={proc.returncode}"),
             "command": command,
-            "stdout": proc.stdout,
-            "stderr": proc.stderr,
+            "stdout": redact_text(proc.stdout),
+            "stderr": redact_text(proc.stderr),
             "exit_code": proc.returncode,
             "timed_out": False,
         }
     except subprocess.TimeoutExpired as exc:
-        stdout = _coerce_text(exc.stdout)
-        stderr = _coerce_text(exc.stderr)
+        stdout = redact_text(_coerce_text(exc.stdout))
+        stderr = redact_text(_coerce_text(exc.stderr))
         return {
             "provider": provider,
             "verdict": "ENVIRONMENT-SKIP",

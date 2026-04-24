@@ -22,11 +22,74 @@ VALID_COMPLEXITY = {"S", "M", "L", "XL"}
 PACKAGE_COMMAND_PREFIX = "wp-"
 PACKAGE_PLUGIN_FILE = "workflowprogram.ts"
 PACKAGE_PLUGIN_ID = "workflowprogram-package-bridge"
-SUPPORTED_PACKAGE_INTENTS = ("develop", "validate", "preflight", "hotfix", "iterate", "ship")
-MUTATING_PACKAGE_INTENTS = ("develop", "hotfix", "iterate")
-READ_ONLY_PACKAGE_INTENTS = ("validate", "preflight", "ship")
+SCHEMA_VERSION = "opencode-v2.1"
+PRODUCT_INTENT_CONTRACT: dict[str, dict[str, Any]] = {
+    "develop": {
+        "command": "wp-develop",
+        "mutating": True,
+        "requires_existing_target": False,
+        "spec_flow": True,
+    },
+    "validate": {
+        "command": "wp-validate",
+        "mutating": False,
+        "requires_existing_target": False,
+        "spec_flow": True,
+    },
+    "preflight": {
+        "command": "wp-preflight",
+        "mutating": False,
+        "requires_existing_target": False,
+        "spec_flow": True,
+    },
+    "hotfix": {
+        "command": "wp-hotfix",
+        "mutating": True,
+        "requires_existing_target": True,
+        "spec_flow": True,
+    },
+    "iterate": {
+        "command": "wp-iterate",
+        "mutating": True,
+        "requires_existing_target": True,
+        "spec_flow": True,
+    },
+    "ship": {
+        "command": "wp-ship",
+        "mutating": False,
+        "requires_existing_target": True,
+        "spec_flow": True,
+    },
+    "audit": {
+        "command": "wp-audit",
+        "mutating": False,
+        "requires_existing_target": False,
+        "spec_flow": True,
+    },
+    "evolve": {
+        "command": "wp-evolve",
+        "mutating": True,
+        "requires_existing_target": True,
+        "spec_flow": True,
+    },
+    "orchestrate": {
+        "command": "wp-orchestrate",
+        "mutating": False,
+        "requires_existing_target": False,
+        "spec_flow": False,
+    },
+}
+SUPPORTED_PACKAGE_INTENTS = tuple(PRODUCT_INTENT_CONTRACT)
+MUTATING_PACKAGE_INTENTS = tuple(
+    intent for intent, contract in PRODUCT_INTENT_CONTRACT.items() if contract["mutating"]
+)
+READ_ONLY_PACKAGE_INTENTS = tuple(
+    intent for intent, contract in PRODUCT_INTENT_CONTRACT.items() if not contract["mutating"]
+)
 PACKAGE_UTILITY_COMMANDS = ("wp-doctor",)
-REQUIRED_PACKAGE_COMMANDS = tuple(f"{PACKAGE_COMMAND_PREFIX}{intent}" for intent in SUPPORTED_PACKAGE_INTENTS) + (
+REQUIRED_PACKAGE_COMMANDS = tuple(
+    str(contract["command"]) for contract in PRODUCT_INTENT_CONTRACT.values()
+) + (
     PACKAGE_UTILITY_COMMANDS
 )
 REQUIRED_PACKAGE_AGENTS = (
@@ -37,6 +100,7 @@ REQUIRED_PACKAGE_AGENTS = (
     "security-reviewer",
     "performance-reviewer",
     "style-reviewer",
+    "test-scenario-generator",
 )
 INSTALL_MANIFEST_PATH = ".workflowprogram/package/install-manifest.json"
 MANDATORY_DESIGN_FILES = (

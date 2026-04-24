@@ -17,9 +17,15 @@ ENTRY_COMMAND_BY_INTENT = {
     "hotfix": "wp-hotfix",
     "iterate": "wp-iterate",
     "ship": "wp-ship",
+    "audit": "wp-audit",
+    "evolve": "wp-evolve",
+    "orchestrate": "wp-orchestrate",
 }
 
 INTENT_KEYWORDS = {
+    "orchestrate": [("orchestrate", 5), ("route", 3), ("decide", 3), ("编排", 5), ("路由", 4)],
+    "audit": [("audit", 5), ("review workflow", 4), ("inspect", 3), ("审计", 5), ("复盘", 3)],
+    "evolve": [("evolve", 5), ("upgrade workflow", 4), ("evolution", 3), ("演进", 5), ("升级工作流", 4)],
     "preflight": [("preflight", 4), ("readiness", 3), ("ready", 2), ("预检", 4), ("就绪", 3)],
     "hotfix": [("hotfix", 5), ("patch", 3), ("repair", 2), ("热修", 5), ("修复", 3)],
     "iterate": [("iterate", 4), ("improve", 2), ("optimize", 2), ("迭代", 4), ("优化", 2)],
@@ -38,7 +44,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def explicit_intent(request: str) -> str | None:
-    match = re.match(r"^\s*/(wp-develop|wp-validate|wp-preflight|wp-hotfix|wp-iterate|wp-ship)\b", request)
+    match = re.match(
+        r"^\s*/(wp-develop|wp-validate|wp-preflight|wp-hotfix|wp-iterate|wp-ship|wp-audit|wp-evolve|wp-orchestrate)\b",
+        request,
+    )
     if not match:
         return None
     return match.group(1).removeprefix("wp-")

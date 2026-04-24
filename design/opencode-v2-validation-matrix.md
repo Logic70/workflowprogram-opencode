@@ -103,6 +103,22 @@
 | SMK-04 | managed apply smoke | 能安全写入目标项目 | plan/result 正常，未静默覆盖 |
 | SMK-05 | validation smoke | 能输出多层校验摘要 | validation summary 存在 |
 | SMK-06 | host integration smoke | WorkflowProgram 产品包在真实 OpenCode 宿主中的最小可发现性成立 | package commands/plugin 至少可被宿主发现；若 provider/API 未就绪可返回 `ENVIRONMENT-SKIP` |
+| SMK-07 | target host reload smoke | 生成后的 target workflow 在真实 OpenCode 宿主中可发现 | target commands/plugins 在 host reload 后可见；无真实 host 时只能返回 `ENVIRONMENT-SKIP` |
+
+## 7.1 后续能力硬化检查项
+
+| ID | 检查项 | 输入 | 规则 | 失败分类 |
+|---|---|---|---|---|
+| INT-01 | intent contract 完整 | commands、runtime intent、handler、spec flow | 不允许存在 command/runtime/spec flow 悬空项 | intent_contract |
+| AGT-01 | package agent role schema 合法 | `.opencode/agents/*.md` | 必需 role 元数据存在且取值合法 | agent_contract |
+| AGT-02 | team plan 可解析 | `RUN_ROOT/outputs/team-plan.json` | 阶段、角色、输入、输出、fan-in 策略完整 | orchestration |
+| HOST-01 | host source inventory 存在 | doctor diagnostics | 必须列出 project/global/known external asset sources | host_isolation |
+| HOST-02 | namespace shadowing 检测 | commands/agents/skills/plugins | 同名或覆盖风险必须报告来源路径 | namespace_shadowing |
+| REL-01 | release manifest 合法 | `dist/opencode/manifest.json` | 文件清单、checksum、excluded patterns 必须完整 | release_contract |
+| MIG-01 | schema version 存在 | spec/manifest/run-state/install manifest | 版本字段必须存在且兼容 | schema_contract |
+| APP-01 | managed apply lock/rollback 存在 | apply evidence | 变更型 intent 必须具备 lock 与恢复证据 | apply_recovery |
+| ERR-01 | error code 合法 | runtime/validator/doctor/smoke reports | 失败必须包含稳定 error code 与 remediation | error_taxonomy |
+| SEC-01 | 证据脱敏 | logs/reports/events | 不得泄露 token/API key/敏感环境变量 | privacy |
 
 ## 8. 需求到校验追踪矩阵
 
@@ -118,6 +134,14 @@
 | AR-08 校验分层 | 全矩阵 |
 | AR-09 名称空间隔离 | PKG-11, SPEC-09, TGT-05, TGT-08 |
 | AR-10 最小可安装 | PKG-01 ~ PKG-10, SMK-01 |
+| AR-11 生命周期入口完整 | INT-01 |
+| AR-12 团队编排可建模 | AGT-01 ~ AGT-02 |
+| AR-13 宿主隔离可诊断 | HOST-01 ~ HOST-02 |
+| AR-14 目标加载可验证 | SMK-07 |
+| AR-15 发布包可复现 | REL-01 |
+| AR-16 契约可演进 | MIG-01 |
+| AR-17 写入可恢复 | APP-01 |
+| AR-18 运行可审计 | ERR-01, SEC-01 |
 
 ## 9. 建议执行顺序
 

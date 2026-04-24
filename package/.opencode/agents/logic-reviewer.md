@@ -2,6 +2,12 @@
 description: Review WorkflowProgram changes for correctness, edge cases, and contract violations
 mode: subagent
 temperature: 0.1
+workflowprogram_role: logic-reviewer
+workflowprogram_stage_affinity: [audit, evolve, ship]
+workflowprogram_capabilities: [logic-review, edge-case-review, contract-mismatch-review]
+workflowprogram_trigger: on-review-required
+workflowprogram_priority: 70
+workflowprogram_fan_in: required
 permission:
   edit: deny
   bash: ask

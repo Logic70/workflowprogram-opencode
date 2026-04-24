@@ -52,6 +52,16 @@
 | AR-08 | 校验分层 | package/spec/target/run-state 校验职责必须独立 |
 | AR-09 | 名称空间隔离 | package commands / plugins 与 target commands / plugins 不得冲突 |
 | AR-10 | 最小可安装 | v1 以 `package/` 作为部署源，通过安装脚本生成宿主可发现布局，不依赖额外构建产物 |
+| AR-11 | 生命周期入口完整 | 产品 intent 必须覆盖 develop/validate/preflight/hotfix/iterate/ship/audit/evolve/orchestrate，且 command、runtime、spec flow 三者一致 |
+| AR-12 | 团队编排可建模 | package agents 需要具备角色、阶段、触发条件和汇聚策略，支持 agentteam 与 subagent 执行机制分离 |
+| AR-13 | 宿主隔离可诊断 | 能识别 OpenCode 全局配置、Claude 目录、oh-my-opencode 或其它外部资产对当前项目的污染风险 |
+| AR-14 | 目标加载可验证 | smoke 必须区分 package host 可见性与 target workflow host reload 可见性 |
+| AR-15 | 发布包可复现 | release 包必须从干净构建产物生成，不携带 runs、cache、node_modules 等本地运行痕迹 |
+| AR-16 | 契约可演进 | spec、manifest、run-state、error code 必须具备版本与迁移策略 |
+| AR-17 | 写入可恢复 | managed apply 必须支持冲突检测、并发锁、幂等性、回滚或可恢复失败 |
+| AR-18 | 运行可审计 | 权限、隐私脱敏、日志保留、错误分类必须可被 validator 和 doctor 统一解释 |
+| AR-19 | 平台边界明确 | WSL/Windows 路径、离线依赖、OpenCode 版本兼容和 plugin reload 规则必须显式记录 |
+| AR-20 | 能力差距可追踪 | ClaudeCode 到 OpenCode 的能力映射必须维护为设计资产，明确已实现、不适用、待规划和替代实现 |
 
 ### 架构级原则与约束
 
@@ -423,3 +433,93 @@ v1 采用 `source-as-deployment-source` 模式。
 
 - 部署 WorkflowProgram 产品包，不代表自动部署目标工作流
 - 生成目标工作流，不得回写 WorkflowProgram 产品包目录
+
+## 差距闭环扩展架构
+
+本节定义从当前 OpenCode v2 核心链路继续补齐 ClaudeCode 版能力时的架构级改动目标。这里的目标不是复制 ClaudeCode 的 `.claude` 加载模型，而是把等价产品能力落到 OpenCode 的 command、agent、plugin、runtime、validator 与 smoke 机制上。
+
+### 改动目标总表
+
+| 目标编号 | 目标 | 归属层 | 实现方向 | 优先级 |
+|---|---|---|---|---|
+| GC-01 | 补齐 `audit`、`evolve`、`orchestrate` 产品生命周期入口 | 产品包层 / 设计控制层 | 新增 `/wp-audit`、`/wp-evolve`、`/wp-orchestrate`，并同步 runtime intent 与 spec `intent_flows` | P1 |
+| GC-02 | 建立 agentteam 编排模型 | 设计控制层 | 给 package agents 增加角色元数据，新增 team plan、dispatch、fan-in 汇聚和 reviewer quorum | P1 |
+| GC-03 | 增加测试场景生成角色 | 产品包层 / 校验层 | 新增 `test-scenario-generator` agent，并接入 validate/audit/evolve 的证据生成 | P1 |
+| GC-04 | 建立宿主隔离与兼容诊断 | 产品包层 / OM层 | doctor 识别全局 OpenCode 配置、Claude 资产串入、oh-my-opencode 资产、OpenCode 版本与 plugin reload 状态 | P1 |
+| GC-05 | 建立 target host reload smoke | 校验层 | 在 develop 生成 target command/plugin 后重启或重新进入 OpenCode host，验证 target 可发现性 | P1 |
+| GC-06 | 建立 release build 产物 | 构建层 / 部署层 | 新增 package build，把 `package/` 清洗为 `dist/opencode/` 或 release archive | P2 |
+| GC-07 | 增加 schema version 与 migration | 数据层 | 对 workflow spec、managed manifest、run-state、install manifest 增加版本与迁移器 | P2 |
+| GC-08 | 强化 managed apply | 目标交付层 | 增加并发锁、幂等 diff、冲突解释、失败恢复和 rollback manifest | P2 |
+| GC-09 | 建立统一错误码与权限策略 | OM层 / 安全层 | 统一 runtime、validator、doctor、plugin hook 的 error code 与 permission policy | P2 |
+| GC-10 | 增加深度 validator 与 fixtures | 校验层 | 补 workflow draft、lowlevel、generated runtime、lessons delta、clarification review 与 golden fixtures | P2 |
+| GC-11 | 增强安装生命周期 | 部署层 | 覆盖 upgrade/uninstall/status/offline install/dependency lock/WSL-Windows path 场景 | P2 |
+| GC-12 | 建立能力映射矩阵 | 设计资产 | 维护 ClaudeCode capability -> OpenCode capability 的状态矩阵 | P1 |
+
+### 扩展上下文模型
+
+```mermaid
+graph TB
+    Host["OpenCode Host"]
+    Global["Global OpenCode Config\n+ external packs"]
+    Claude["ClaudeCode Assets\nreference only"]
+    WP["WorkflowProgram OpenCode Package"]
+    Orch["Product Orchestrator\n/wp-orchestrate"]
+    Team["Agent Team Planner"]
+    Runtime["Runtime Control Plane"]
+    Target["Target Workflow Bundle"]
+    Smoke["Host + Target Smoke"]
+    Release["Release Builder"]
+    CI["CI / Regression Fixtures"]
+
+    Global -. "may pollute discovery" .-> Host
+    Claude -. "semantic reference only" .-> WP
+    Host --> WP
+    WP --> Orch
+    Orch --> Team
+    Team --> Runtime
+    Runtime --> Target
+    Runtime --> Smoke
+    Release --> WP
+    CI --> Release
+    CI --> Smoke
+```
+
+### 扩展逻辑元素
+
+| 元素名 | 功能描述 | 提供的逻辑接口 | 上级系统 |
+|---|---|---|---|
+| Product Orchestrator | 识别用户意图并路由到 develop/validate/preflight/hotfix/iterate/ship/audit/evolve | `Orchestrator.Route` | 设计控制层 |
+| Intent Contract Registry | 维护 command、runtime intent、spec flow 的一致性 | `IntentContract.Resolve` | 设计控制层 |
+| Agent Role Registry | 维护 agent 的角色、阶段、能力、触发条件 | `AgentRole.Resolve` | 设计控制层 |
+| Agent Team Planner | 根据目标工作流阶段规划 agentteam，决定 subagent 调用顺序和汇聚策略 | `AgentTeam.Plan` | 设计控制层 |
+| Host Isolation Doctor | 检查宿主配置污染、全局资产串入、OpenCode 版本与 reload 状态 | `HostIsolation.Check` | OM层 |
+| Target Host Smoke Runner | 验证 target command/plugin 被真实 OpenCode host 发现 | `TargetHostSmoke.Run` | 校验层 |
+| Release Builder | 生成干净发布包和完整性清单 | `Release.Build` | 构建层 |
+| Migration Engine | 对 spec、manifest、run-state 做版本迁移 | `Migration.Apply` | 数据层 |
+| Error Taxonomy | 统一错误码、失败分类与 remediation 文案 | `ErrorTaxonomy.Lookup` | OM层 |
+| Capability Parity Matrix | 记录 ClaudeCode 能力与 OpenCode 能力状态 | `Parity.Query` | 设计资产 |
+
+### 扩展数据所有权
+
+| 数据实体 | 所有者 | 读 | 写 | 无权限 |
+|---|---|---|---|---|
+| Intent Contract Registry | Product Orchestrator | runtime / validator / docs | package maintainer | target runtime |
+| Agent Role Registry | Agent Team Planner | orchestrator / runtime | package maintainer | target runtime |
+| Team Plan | Agent Team Planner | runtime / validators | runtime | package loader |
+| Host Isolation Report | Host Isolation Doctor | user / doctor / smoke | doctor | target workflow |
+| Target Host Smoke Report | Target Host Smoke Runner | CI / user | smoke runner | package builder |
+| Release Manifest | Release Builder | installer / CI | release builder | target workflow |
+| Migration Manifest | Migration Engine | validators / runtime | migration engine | host loader |
+| Error Code Registry | Error Taxonomy | all runtime components | package maintainer | target workflow |
+| Capability Parity Matrix | package maintainer | user / planner | package maintainer | runtime mutators |
+
+### 架构决策
+
+| 决策 | 结论 |
+|---|---|
+| ClaudeCode 能力是否直接复制路径 | 不复制；只做语义级能力映射 |
+| OpenCode package 是否仍是独立项目 | 是；所有新增能力必须先落到 OpenCode 独立仓库的 package/runtime/docs/spec |
+| `audit` 不一致如何处理 | 必须补 `/wp-audit` 与 runtime handler，或移除 spec 中的 `audit` flow；优先补齐 |
+| agentteam 与 subagent 是否等价 | 不等价；agentteam 是阶段职责与团队结构，subagent 是执行机制 |
+| target host smoke 是否替代 package host smoke | 不替代；二者分别验证产品包可见性和目标工作流可见性 |
+| release build 是否替代 `package/` 部署源 | 不替代 v1 安装路径；作为发布和 CI 的干净产物来源 |

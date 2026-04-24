@@ -37,6 +37,12 @@ def remediation_markdown(report: dict[str, Any]) -> str:
             lines.append("- Use a writable `TARGET_ROOT`, or adjust filesystem permissions for the current project.")
         elif check["id"] == "DOC-07":
             lines.append("- Run `/wp-develop` first, because the target workflow has not been generated yet.")
+        elif check["id"] == "DOC-08":
+            lines.append("- Resolve namespace shadowing by opening OpenCode from the intended project root or temporarily disabling conflicting global OpenCode/Claude/oh-my-opencode assets.")
+        elif check["id"] == "DOC-10":
+            lines.append("- Check the installed OpenCode version and upgrade or pin WorkflowProgram to a compatible OpenCode release.")
+        elif check["id"] == "DOC-11":
+            lines.append("- Restart OpenCode or reopen the project after plugin changes if commands/hooks appear stale.")
         else:
             lines.append(f"- Resolve `{check['id']}`: {check['detail']}")
     if lines[-1] == "":

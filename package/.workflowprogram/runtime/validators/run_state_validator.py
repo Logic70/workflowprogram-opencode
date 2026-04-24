@@ -14,7 +14,8 @@ RUNTIME_DIR = Path(__file__).resolve().parents[1]
 if str(RUNTIME_DIR) not in sys.path:
     sys.path.insert(0, str(RUNTIME_DIR))
 
-from runtime_common import FAILURE_KINDS, STAGE_SLOTS, read_json, read_jsonl  # noqa: E402
+from runtime_common import FAILURE_KINDS, MUTATING_PACKAGE_INTENTS, SCHEMA_VERSION, STAGE_SLOTS, read_json, read_jsonl  # noqa: E402
+from error_codes import code_for, remediation_for  # noqa: E402
 
 
 def _check(check_id: str, passed: bool, detail: str, category: str) -> dict[str, Any]:
@@ -23,6 +24,8 @@ def _check(check_id: str, passed: bool, detail: str, category: str) -> dict[str,
         "passed": passed,
         "detail": detail,
         "category": category,
+        "error_code": None if passed else code_for(category, check_id),
+        "remediation": None if passed else remediation_for(category),
     }
 
 
@@ -36,6 +39,8 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
     stages_root = resolved / "outputs" / "stages"
     diagnostics_root = resolved / "outputs" / "diagnostics"
     clarification_root = resolved / "outputs" / "clarification"
+    team_plan_path = resolved / "outputs" / "team-plan.json"
+    managed_result_path = resolved / "outputs" / "managed-change-result.json"
 
     checks.append(_check("RUN-01", context_path.is_file(), f"context={context_path}", "evidence_missing"))
     checks.append(_check("RUN-02", state_path.is_file(), f"state={state_path}", "evidence_missing"))
@@ -59,11 +64,15 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
     diagnostics_content_ok = False
     clarification_ok = True
     clarification_content_ok = True
+    team_plan_ok = False
+    apply_recovery_ok = True
+    schema_version_ok = True
     if context_path.is_file() and state_path.is_file() and events_path.is_file():
         context = read_json(context_path)
         state = read_json(state_path)
         events = read_jsonl(events_path)
         intent = str(context.get("intent", "")).strip()
+        schema_version_ok = state.get("schema_version") in {SCHEMA_VERSION, None}
         verdict_ok = state.get("verdict") in {"PASS", "WARN", "FAIL", "ENVIRONMENT-SKIP"}
         failure_kind = state.get("failure_kind")
         failure_kind_ok = failure_kind in list(FAILURE_KINDS) + [None]
@@ -124,6 +133,27 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
                     )
                 )
 
+        if team_plan_path.is_file():
+            team_plan = read_json(team_plan_path)
+            team_plan_ok = (
+                team_plan.get("planner") == "workflowprogram-agent-team-planner"
+                and team_plan.get("intent") == intent
+                and isinstance(team_plan.get("selected_agents"), list)
+                and isinstance(team_plan.get("fan_in"), dict)
+            )
+
+        if intent in MUTATING_PACKAGE_INTENTS:
+            apply_recovery_ok = False
+            if managed_result_path.is_file():
+                managed_result = read_json(managed_result_path)
+                rollback_path = managed_result.get("rollback_manifest")
+                apply_recovery_ok = (
+                    managed_result.get("schema_version") in {SCHEMA_VERSION, None}
+                    and isinstance(managed_result.get("lock"), dict)
+                    and isinstance(rollback_path, str)
+                    and Path(rollback_path).is_file()
+                )
+
     checks.append(_check("RUN-05", verdict_ok, "state.verdict must be valid", "state_invalid"))
     checks.append(
         _check(
@@ -172,6 +202,30 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
             clarification_content_ok,
             "develop clarification package must include record, question lists, readiness report, and assumption log",
             "evidence_inconsistent",
+        )
+    )
+    checks.append(
+        _check(
+            "AGT-02",
+            team_plan_ok,
+            f"team_plan={team_plan_path}",
+            "orchestration",
+        )
+    )
+    checks.append(
+        _check(
+            "MIG-01",
+            schema_version_ok,
+            f"schema_version={SCHEMA_VERSION}",
+            "schema_contract",
+        )
+    )
+    checks.append(
+        _check(
+            "APP-01",
+            apply_recovery_ok,
+            f"managed_result={managed_result_path}",
+            "apply_recovery",
         )
     )
 

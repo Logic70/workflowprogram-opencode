@@ -2,6 +2,12 @@
 description: Verify WorkflowProgram runtime evidence and judge whether the generated workflow actually behaved as designed
 mode: subagent
 temperature: 0.1
+workflowprogram_role: workflow-verifier
+workflowprogram_stage_affinity: [validate, audit, ship]
+workflowprogram_capabilities: [evidence-review, run-state-check, smoke-review]
+workflowprogram_trigger: on-evidence-required
+workflowprogram_priority: 60
+workflowprogram_fan_in: required
 permission:
   edit: deny
   bash: ask

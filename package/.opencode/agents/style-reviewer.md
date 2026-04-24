@@ -2,6 +2,12 @@
 description: Review WorkflowProgram changes for readability, maintainability, and structural clarity
 mode: subagent
 temperature: 0.1
+workflowprogram_role: style-reviewer
+workflowprogram_stage_affinity: [audit, evolve, ship]
+workflowprogram_capabilities: [maintainability-review, readability-review, structure-review]
+workflowprogram_trigger: on-style-review-required
+workflowprogram_priority: 70
+workflowprogram_fan_in: optional
 permission:
   edit: deny
   bash: ask

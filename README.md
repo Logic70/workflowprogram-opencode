@@ -9,12 +9,15 @@ WorkflowProgram 的 OpenCode 独立版本。
 - `/wp-preflight`：做 package 和目标工作流就绪度检查
 - `/wp-hotfix`：对已有目标工作流做受控热修
 - `/wp-iterate`：基于已有工作流和前次运行上下文做迭代
+- `/wp-audit`：只读审计 package、target bundle、run-state、host 诊断和 lessons 证据
+- `/wp-evolve`：基于已有工作流做受控演进，写入仍走 managed apply
+- `/wp-orchestrate`：根据自然语言请求给出推荐 `/wp-*` 入口，默认不自动执行变更型 intent
 - `/wp-ship`：确认已有目标工作流的交付就绪度
 - `/wp-validate`：对 package、spec、target bundle、run-state 做分层校验
-- package agent pack：`@workflow-designer`、`@workflow-validator`、`@workflow-verifier`、`@logic-reviewer`、`@security-reviewer`、`@performance-reviewer`、`@style-reviewer`
+- package agent pack：`@workflow-designer`、`@workflow-validator`、`@workflow-verifier`、`@logic-reviewer`、`@security-reviewer`、`@performance-reviewer`、`@style-reviewer`、`@test-scenario-generator`
 - `project-local` / `global` 安装
 - 可选 package 专用 Python `venv`
-- runtime smoke 与真实 OpenCode host integration smoke
+- runtime smoke、真实 OpenCode package host integration smoke、target host reload smoke
 
 它不是 ClaudeCode 版的兼容层，也不是从 Claude 版复制后简单替换路径的 adapter。这里的目标是维护一个 **OpenCode only** 的独立实现。
 
@@ -101,6 +104,9 @@ python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py status --
 - `/wp-preflight`
 - `/wp-hotfix`
 - `/wp-iterate`
+- `/wp-audit`
+- `/wp-evolve`
+- `/wp-orchestrate`
 - `/wp-ship`
 - `/wp-validate`
 
@@ -113,6 +119,7 @@ python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py status --
 - `@security-reviewer`
 - `@performance-reviewer`
 - `@style-reviewer`
+- `@test-scenario-generator`
 
 典型流程：
 
@@ -120,8 +127,11 @@ python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py status --
 2. 需要先诊断环境时执行 `/wp-doctor`
 3. 需要先检查就绪度时执行 `/wp-preflight`
 4. 对已有工作流修复或增量调整时执行 `/wp-hotfix` 或 `/wp-iterate`
-5. 准备最终确认时执行 `/wp-ship`
-6. 执行 `/wp-validate`
+5. 需要只读审计时执行 `/wp-audit`
+6. 需要基于审计或 lessons 演进时执行 `/wp-evolve`
+7. 不确定该用哪个入口时执行 `/wp-orchestrate`
+8. 准备最终确认时执行 `/wp-ship`
+9. 执行 `/wp-validate`
 
 ## Doctor 常见结果
 
@@ -133,6 +143,12 @@ python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py status --
   - 说明当前项目目录不可写，`develop/hotfix/iterate` 这类写入型命令无法正常工作
 - `DOC-07` 失败
   - 说明当前项目还没有生成目标工作流，先执行 `/wp-develop`
+- `DOC-08` 失败
+  - 说明存在命令、agent、skill 或 plugin 命名遮蔽风险，通常来自全局 OpenCode 配置、Claude 目录或 oh-my-opencode
+- `DOC-10` 失败
+  - 说明 OpenCode 版本或 CLI 探测异常，需要检查当前 shell 中的 `opencode --version`
+- `DOC-11`
+  - 提示安装或更新 plugin 后，如果命令/hook 行为没有刷新，需要重启 OpenCode 或重新打开项目
 
 ## 安装后的目录布局
 
@@ -147,6 +163,9 @@ python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py status --
 │   │   ├── wp-preflight.md
 │   │   ├── wp-hotfix.md
 │   │   ├── wp-iterate.md
+│   │   ├── wp-audit.md
+│   │   ├── wp-evolve.md
+│   │   ├── wp-orchestrate.md
 │   │   ├── wp-ship.md
 │   │   └── wp-validate.md
 │   └── plugins/
@@ -173,6 +192,10 @@ python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py status --
 - 可选 `venv` 创建与依赖安装
 - runtime 级 `develop -> validate` 闭环
 - package/spec/target/run-state 分层校验
+- audit/evolve/orchestrate 产品 intent 契约
+- agent role metadata 与 team-plan evidence
+- managed apply lock 与 rollback manifest
+- clean release package build
 
 本地验证过：
 
@@ -185,16 +208,32 @@ python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py status --
 当前已经补上两层 smoke：
 
 - `runtime smoke`
-  - 直接调用 Python runtime，验证 `install -> develop -> preflight -> hotfix -> iterate -> ship -> validate`
+  - 直接调用 Python runtime，验证 `install -> develop -> preflight -> hotfix -> iterate -> audit -> evolve -> orchestrate -> ship -> validate`
 - `host integration smoke`
   - 真实调用 `opencode run --command ...`
   - 检查 OpenCode CLI、package commands、package plugin、命令发现、以及运行时是否真正进入 bash/tool 阶段
   - 在 provider/API 未就绪时允许返回 `ENVIRONMENT-SKIP`
+- `target host reload smoke`
+  - 检查已生成 target command/plugin 的静态可见性
+  - 真实 OpenCode 可用时尝试通过 target command 进入目标 runtime
+  - provider/API 不可用时只返回 `ENVIRONMENT-SKIP`，不伪造 `PASS`
 
 手工运行 host integration smoke：
 
 ```bash
 python3 package/.workflowprogram/runtime/host-integration-smoke.py --package-root <installed-project-root> --target-root <installed-project-root> --timeout-seconds 15 --json
+```
+
+手工运行 target host reload smoke：
+
+```bash
+python3 package/.workflowprogram/runtime/target-host-smoke.py --target-root <target-project-root> --timeout-seconds 15 --json
+```
+
+构建干净 release 包：
+
+```bash
+python3 tools/build_package.py --source-package-root package --output-root dist/opencode --clean --json
 ```
 
 结果解释：

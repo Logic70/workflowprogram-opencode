@@ -2,6 +2,12 @@
 description: Validate generated WorkflowProgram files for structure, completeness, and cross-file consistency
 mode: subagent
 temperature: 0.1
+workflowprogram_role: workflow-validator
+workflowprogram_stage_affinity: [validate, audit, ship]
+workflowprogram_capabilities: [contract-check, target-bundle-check, schema-check]
+workflowprogram_trigger: on-validation-required
+workflowprogram_priority: 50
+workflowprogram_fan_in: required
 permission:
   edit: deny
   bash: ask

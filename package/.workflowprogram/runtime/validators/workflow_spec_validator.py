@@ -21,12 +21,15 @@ from runtime_common import (  # noqa: E402
     PACKAGE_COMMAND_PREFIX,
     PACKAGE_PLUGIN_FILE,
     PACKAGE_PLUGIN_ID,
+    PRODUCT_INTENT_CONTRACT,
+    SCHEMA_VERSION,
     STAGE_SLOTS,
     derive_expected_target_files,
     read_yaml,
     registry_commands,
     registry_plugins,
 )
+from error_codes import code_for, remediation_for  # noqa: E402
 
 
 REQUIRED_TOP_KEYS = {
@@ -60,6 +63,8 @@ def _check(check_id: str, passed: bool, detail: str, category: str) -> dict[str,
         "passed": passed,
         "detail": detail,
         "category": category,
+        "error_code": None if passed else code_for(category, check_id),
+        "remediation": None if passed else remediation_for(category),
     }
 
 
@@ -110,7 +115,11 @@ def validate_workflow_spec(spec_path: Path) -> dict[str, Any]:
         if isinstance(stage, dict)
     }
     intent_flows = spec.get("intent_flows", {}) if isinstance(spec.get("intent_flows"), dict) else {}
-    flow_ok = bool(stage_slots) and stage_slots.issubset(set(STAGE_SLOTS))
+    supported_spec_flows = {
+        intent for intent, contract in PRODUCT_INTENT_CONTRACT.items() if contract.get("spec_flow")
+    }
+    flow_names_ok = set(intent_flows).issubset(supported_spec_flows)
+    flow_ok = bool(stage_slots) and stage_slots.issubset(set(STAGE_SLOTS)) and flow_names_ok
     for flow in intent_flows.values():
         if not isinstance(flow, dict):
             flow_ok = False
@@ -121,7 +130,24 @@ def validate_workflow_spec(spec_path: Path) -> dict[str, Any]:
             continue
         if any(slot not in stage_slots for slot in required_slots):
             flow_ok = False
-    checks.append(_check("SPEC-03", flow_ok, f"stage_slots={sorted(stage_slots)}", "design"))
+    checks.append(
+        _check(
+            "SPEC-03",
+            flow_ok,
+            f"stage_slots={sorted(stage_slots)} intent_flows={sorted(intent_flows)} supported={sorted(supported_spec_flows)}",
+            "design",
+        )
+    )
+
+    schema_version = spec.get("schema_version")
+    checks.append(
+        _check(
+            "SPEC-10",
+            schema_version in {SCHEMA_VERSION, None},
+            f"schema_version={schema_version or 'legacy-v1'}",
+            "schema_contract",
+        )
+    )
 
     runtime_contract = (
         spec.get("runtime_contract", {}) if isinstance(spec.get("runtime_contract"), dict) else {}

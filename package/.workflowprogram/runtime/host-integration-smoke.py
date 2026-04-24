@@ -22,6 +22,7 @@ from runtime_common import (
     write_text,
 )
 from runtime_host import invoke_runtime_host, probe_runtime_host
+from error_codes import code_for, remediation_for
 
 
 HOST_COMMAND_SPECS = (
@@ -44,6 +45,8 @@ def _build_check(check_id: str, status: str, detail: str, category: str) -> dict
         "status": status,
         "detail": detail,
         "category": category,
+        "error_code": None if status == "PASS" else code_for(category, check_id),
+        "remediation": None if status == "PASS" else remediation_for(category),
     }
 
 

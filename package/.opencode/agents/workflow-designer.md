@@ -2,6 +2,12 @@
 description: Design WorkflowProgram target workflows with explicit stages, gates, and output contracts
 mode: subagent
 temperature: 0.1
+workflowprogram_role: workflow-designer
+workflowprogram_stage_affinity: [develop, evolve]
+workflowprogram_capabilities: [workflow-design, stage-design, target-contract]
+workflowprogram_trigger: on-design-required
+workflowprogram_priority: 40
+workflowprogram_fan_in: optional
 permission:
   edit: deny
   bash: ask
