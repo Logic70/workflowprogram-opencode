@@ -1,0 +1,61 @@
+name: Publish GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "design/claudecode-to-opencode-adaptation.html"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build static site
+        run: |
+          mkdir -p _site
+          cp design/claudecode-to-opencode-adaptation.html _site/claudecode-to-opencode-adaptation.html
+          cat > _site/index.html <<'HTML'
+          <!doctype html>
+          <html lang="zh-CN">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <meta http-equiv="refresh" content="0; url=./claudecode-to-opencode-adaptation.html">
+            <title>WorkflowProgram OpenCode Docs</title>
+          </head>
+          <body>
+            <p><a href="./claudecode-to-opencode-adaptation.html">ClaudeCode 到 OpenCode 适配通用指南</a></p>
+          </body>
+          </html>
+          HTML
+          touch _site/.nojekyll
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

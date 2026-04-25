@@ -5,16 +5,16 @@ WorkflowProgram 的 OpenCode 独立版本。
 这个仓库提供一套面向 OpenCode 的本地产品包，核心能力包括：
 
 - `/wp-develop`：为当前项目生成目标工作流
-- `/wp-doctor`：诊断 package、Python、OpenCode CLI 和当前项目就绪度
-- `/wp-preflight`：做 package 和目标工作流就绪度检查
+- `/wp-doctor`：诊断 package、Python、OpenCode CLI 和当前项目可用状态
+- `/wp-preflight`：在不修改项目的情况下做运行前检查，适合在 hotfix、evolve、ship 或提交前确认环境、spec、目标产物和宿主加载没有明显阻塞
 - `/wp-hotfix`：对已有目标工作流做受控热修
-- `/wp-iterate`：基于已有工作流和前次运行上下文做迭代
+- `/wp-iterate`：基于用户反馈或前次运行上下文做小步增量调整，适合修正文案、阶段、命令参数或局部生成结果
 - `/wp-audit`：只读审计 package、target bundle、run-state、host 诊断和 lessons 证据
-- `/wp-evolve`：基于已有工作流做受控演进，写入仍走 managed apply
+- `/wp-evolve`：基于已有 workflow、审计结果或 lessons 做版本化演进，适合较系统的能力升级或结构调整，写入仍走 managed apply
 - `/wp-orchestrate`：根据自然语言请求给出推荐 `/wp-*` 入口，默认不自动执行变更型 intent
-- `/wp-ship`：确认已有目标工作流的交付就绪度
+- `/wp-ship`：交付前最终检查，不新增功能；汇总验证、审计、host 加载和交付清单，判断当前目标工作流是否适合提交或发布
 - `/wp-validate`：对 package、spec、target bundle、run-state 做分层校验
-- package agent pack：`@workflow-designer`、`@workflow-validator`、`@workflow-verifier`、`@logic-reviewer`、`@security-reviewer`、`@performance-reviewer`、`@style-reviewer`、`@test-scenario-generator`
+- package agent pack：WorkflowProgram 随包安装的 OpenCode 角色定义，例如 `@workflow-designer`、`@workflow-validator`、`@workflow-verifier`、`@logic-reviewer`、`@security-reviewer`、`@performance-reviewer`、`@style-reviewer`、`@test-scenario-generator`
 - `project-local` 安装
 - 全局轻量 bootstrap：`/wp-install`、`/wp-status`、`/wp-upgrade`、`/wp-uninstall`
 - 可选 package 专用 Python `venv`
@@ -56,11 +56,21 @@ WorkflowProgram 的 OpenCode 独立版本。
 
 ## 安装
 
-### 方式一：安装全局轻量 bootstrap 后在项目中部署
+### 方式一：让 OpenCode 读取安装说明执行安装
 
 推荐。
 
-先安装一次全局 bootstrap：
+在 OpenCode 中输入：
+
+```text
+请读取 <repo-root>/INSTALL_WITH_OPENCODE.md，并严格按默认步骤安装 WorkflowProgram。
+```
+
+安装说明的默认路径是：先安装或确认全局轻量 bootstrap，然后在当前项目中执行 `/wp-install` 完成 project-local 部署。这样以后每个新项目只需要打开 OpenCode 后执行 `/wp-install`。
+
+### 方式二：手动安装全局轻量 bootstrap 后在项目中部署
+
+先执行一次：
 
 ```bash
 python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py install-bootstrap --source-package-root <repo-root>/package --force
@@ -80,7 +90,7 @@ python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py install-b
 python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py bootstrap-status
 ```
 
-### 方式二：直接执行项目本地安装脚本
+### 方式三：直接执行项目本地安装脚本
 
 在目标项目中执行：
 
@@ -100,21 +110,7 @@ python D:\Code\workflowprogram-opencode\package\.workflowprogram\runtime\package
 python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py status --mode project-local --target-root <target-project-root>
 ```
 
-### 方式三：让 OpenCode 读取安装说明自行执行
-
-可行，但它本质上仍然是“agent 按文档执行命令”，不是替代安装脚本的原生安装机制。
-
-让 OpenCode 读取：
-
-- [INSTALL_WITH_OPENCODE.md](./INSTALL_WITH_OPENCODE.md)
-
-例如在 OpenCode 中输入：
-
-```text
-请读取 <repo-root>/INSTALL_WITH_OPENCODE.md，并严格按步骤执行安装。
-```
-
-如果你要稳定、可重复的安装结果，仍然建议优先直接执行 `package-deploy.py`。
+这种方式适合一次性安装、CI 或不想使用全局 bootstrap 的场景；日常新项目推荐方式一或方式二。
 
 ## 使用
 
@@ -144,17 +140,20 @@ python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py status --
 - `@style-reviewer`
 - `@test-scenario-generator`
 
+package agents 是 WorkflowProgram 随包安装到 `.opencode/agents/*.md` 的 OpenCode 角色定义。它们用于设计、校验、验证和专项评审，可以被 WorkflowProgram 的编排逻辑引用，也可以由用户按 OpenCode 的方式显式 `@` 调用。它们不是 agentteam 本身；agentteam 是运行时生成的团队计划和阶段职责，package agent 是其中可被调用的单个执行角色。
+
 典型流程：
 
 1. 执行 `/wp-develop <你的需求>`
 2. 需要先诊断环境时执行 `/wp-doctor`
-3. 需要先检查就绪度时执行 `/wp-preflight`
-4. 对已有工作流修复或增量调整时执行 `/wp-hotfix` 或 `/wp-iterate`
-5. 需要只读审计时执行 `/wp-audit`
-6. 需要基于审计或 lessons 演进时执行 `/wp-evolve`
-7. 不确定该用哪个入口时执行 `/wp-orchestrate`
-8. 准备最终确认时执行 `/wp-ship`
-9. 执行 `/wp-validate`
+3. 在准备 hotfix、evolve、ship 或提交前，想先做不写文件的运行前检查时执行 `/wp-preflight`
+4. 对已有工作流做明确缺陷修复时执行 `/wp-hotfix`
+5. 对已有工作流做小步反馈迭代时执行 `/wp-iterate`
+6. 需要基于审计或 lessons 做较系统的版本化演进时执行 `/wp-evolve`
+7. 需要只读审计时执行 `/wp-audit`
+8. 不确定该用哪个入口时执行 `/wp-orchestrate`
+9. 准备提交或发布当前目标工作流前执行 `/wp-ship`
+10. 需要分层校验当前状态时执行 `/wp-validate`
 
 ## Doctor 常见结果
 
@@ -228,7 +227,7 @@ python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py status --
 - `--create-venv` 下的 `PyYAML` 导入与 runtime 执行
 
 当前仓库已经有真实 OpenCode 宿主的自动化集成 smoke，但它和 runtime smoke 的含义不同。runtime smoke 追求确定性闭环；host integration smoke 会真实调用 `opencode run --command ...`，因此在 provider/API 未就绪时允许返回 `ENVIRONMENT-SKIP`，而不是假装通过。
-当前已经补上两层 smoke：
+当前已经补上四类 smoke：
 
 - `runtime smoke`
   - 直接调用 Python runtime，验证 `install -> develop -> preflight -> hotfix -> iterate -> audit -> evolve -> orchestrate -> ship -> validate`
@@ -274,6 +273,8 @@ python3 tools/build_package.py --source-package-root package --output-root dist/
 ## 设计文档
 
 - [设计索引](./design/index.md)
+- [ClaudeCode 到 OpenCode 适配通用指南（GitHub Pages）](https://logic70.github.io/workflowprogram-opencode/claudecode-to-opencode-adaptation.html)
+- [ClaudeCode 到 OpenCode 适配通用指南（仓库内 HTML）](./design/claudecode-to-opencode-adaptation.html)
 - [HighLevel 设计](./design/opencode-v2-highlevel-design.md)
 - [LowLevel 设计](./design/opencode-v2-lowlevel-design.md)
 - [Validation Matrix](./design/opencode-v2-validation-matrix.md)

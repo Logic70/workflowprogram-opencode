@@ -2,7 +2,7 @@
 
 本文档给 OpenCode 自身读取并执行，用于把 WorkflowProgram 安装到当前项目。
 
-优先方案是先安装一次全局轻量 bootstrap，然后在每个新项目中执行 `/wp-install`。如果当前环境尚未安装 bootstrap，也可以直接执行本文后面的 project-local 安装命令。
+默认方案是先安装或确认全局轻量 bootstrap，然后在当前项目中执行 `/wp-install`。只有用户明确要求一次性项目本地安装时，才跳过 bootstrap，直接执行本文后面的 project-local 安装命令。
 
 ## 适用范围
 
@@ -10,8 +10,8 @@
 - WorkflowProgram 源包路径为：
   - Windows: `D:\Code\WorkflowProgram-CN\opencode-v2\package`
   - WSL/Linux: `/mnt/d/Code/WorkflowProgram-CN/opencode-v2/package`
-- 目标是执行 `project-local` 安装。
-- 如果选择全局 bootstrap，目标是只把 `/wp-install`、`/wp-status`、`/wp-upgrade`、`/wp-uninstall` 安装到 OpenCode 全局配置，完整 WorkflowProgram 仍安装到当前项目。
+- 默认目标是：全局只安装 `/wp-install`、`/wp-status`、`/wp-upgrade`、`/wp-uninstall`，完整 WorkflowProgram 仍安装到当前项目。
+- 如果用户明确要求不使用全局 bootstrap，才执行直接 `project-local` 安装。
 
 ## 执行原则
 
@@ -24,9 +24,9 @@
 
 ## 步骤
 
-### 1. 可选：安装全局轻量 bootstrap
+### 1. 默认：安装或确认全局轻量 bootstrap
 
-如果用户希望以后每个新项目只运行 `/wp-install`，先执行一次全局 bootstrap 安装。
+先检查全局 bootstrap 是否已安装。如果未安装，或状态异常，执行一次全局 bootstrap 安装。
 
 Windows：
 
@@ -46,7 +46,7 @@ python3 /mnt/d/Code/WorkflowProgram-CN/opencode-v2/package/.workflowprogram/runt
 python3 /mnt/d/Code/WorkflowProgram-CN/opencode-v2/package/.workflowprogram/runtime/package-deploy.py bootstrap-status
 ```
 
-安装后，在新项目中打开 OpenCode 并执行：
+bootstrap 可用后，在当前项目中执行：
 
 ```text
 /wp-install
@@ -58,7 +58,7 @@ python3 /mnt/d/Code/WorkflowProgram-CN/opencode-v2/package/.workflowprogram/runt
 - 全局只应出现 `/wp-install`、`/wp-status`、`/wp-upgrade`、`/wp-uninstall`。
 - `/wp-develop` 等完整产品命令只应在当前项目完成 project-local 安装后出现。
 
-### 2. 识别平台与解释器
+### 2. 如果跳过 bootstrap：识别平台与解释器
 
 先判断当前 shell 环境：
 
@@ -70,7 +70,7 @@ python3 /mnt/d/Code/WorkflowProgram-CN/opencode-v2/package/.workflowprogram/runt
 - 源包路径
 - 当前工作目录
 
-### 3. 执行项目本地安装
+### 3. 如果跳过 bootstrap：执行项目本地安装
 
 如果当前环境是 Windows，请执行：
 
@@ -84,7 +84,7 @@ python D:\Code\WorkflowProgram-CN\opencode-v2\package\.workflowprogram\runtime\p
 python3 /mnt/d/Code/WorkflowProgram-CN/opencode-v2/package/.workflowprogram/runtime/package-deploy.py install --mode project-local --create-venv --python python3 --source-package-root /mnt/d/Code/WorkflowProgram-CN/opencode-v2/package --target-root .
 ```
 
-### 4. 执行状态检查
+### 4. 如果跳过 bootstrap：执行状态检查
 
 如果当前环境是 Windows，请执行：
 
