@@ -27,7 +27,28 @@ function resolvePluginDirectory(): string {
   return path.dirname(fileURLToPath(import.meta.url))
 }
 
+function readPackageRootFromManifest(dir: string): string | null {
+  const manifestPath = path.join(dir, ".workflowprogram", "package", "install-manifest.json")
+  if (!fs.existsSync(manifestPath)) {
+    return null
+  }
+  try {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"))
+    const sourceRoot = typeof manifest.source_package_root === "string" ? manifest.source_package_root : ""
+    if (sourceRoot && fs.existsSync(sourceRoot)) {
+      return path.resolve(sourceRoot)
+    }
+  } catch {
+    // ignore
+  }
+  return null
+}
+
 function derivePackageRoot(pluginDirectory: string, currentDirectory: string): string {
+  const fromManifest = readPackageRootFromManifest(currentDirectory)
+  if (fromManifest) {
+    return fromManifest
+  }
   const normalized = path.resolve(pluginDirectory)
   if (path.basename(normalized) === "plugins") {
     const parent = path.dirname(normalized)
@@ -40,17 +61,11 @@ function derivePackageRoot(pluginDirectory: string, currentDirectory: string): s
 }
 
 function detectRuntimeRoot(packageRoot: string): string {
-  const deployed = path.join(packageRoot, ".workflowprogram", "package", "runtime")
-  if (fs.existsSync(deployed)) {
-    return deployed
-  }
   return path.join(packageRoot, ".workflowprogram", "runtime")
 }
 
 function venvPythonPath(packageRoot: string): string | null {
   const candidates = [
-    path.join(packageRoot, ".workflowprogram", "package", ".venv", "Scripts", "python.exe"),
-    path.join(packageRoot, ".workflowprogram", "package", ".venv", "bin", "python"),
     path.join(packageRoot, ".workflowprogram", ".venv", "Scripts", "python.exe"),
     path.join(packageRoot, ".workflowprogram", ".venv", "bin", "python"),
   ]
@@ -202,10 +217,10 @@ export const WorkflowProgramPackageBridge = async (context: {
       }
       const command = input?.args?.command || ""
       const normalizedRuntimeRoot = normalizePath(runtimeRoot)
+      // Engine-in-cache model (deepseek): only .workflowprogram/runtime/ is relevant
       if (
         !command.includes(normalizedRuntimeRoot) &&
-        !command.includes(".workflowprogram/runtime/") &&
-        !command.includes(".workflowprogram/package/runtime/")
+        !command.includes(".workflowprogram/runtime/")
       ) {
         return
       }

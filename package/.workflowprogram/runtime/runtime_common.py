@@ -415,12 +415,18 @@ def infer_package_root_from_runtime_dir(runtime_dir: Path) -> Path:
 
 
 def detect_package_layout(package_root: Path) -> PackageLayout:
+    """Detect package layout.
+
+    Engine-in-cache model (deepseek): package_root always points to cache or source
+    package, never to a deployed target project. Target projects only contain
+    .opencode/ assets and install-manifest.json. The Python engine runtime
+    (.workflowprogram/runtime/) lives exclusively at the cache/source root.
+    """
     root = package_root.resolve()
     config_path = root / "opencode.json"
 
-    source_runtime = root / ".workflowprogram" / "runtime"
-    deployed_runtime = root / ".workflowprogram" / "package" / "runtime"
-    runtime_root = deployed_runtime if deployed_runtime.exists() else source_runtime
+    # Engine-in-cache: only source-package layout (no deployed copy in project)
+    runtime_root = root / ".workflowprogram" / "runtime"
     validators_dir = runtime_root / "validators"
 
     local_commands = root / ".opencode" / "commands"
@@ -434,9 +440,7 @@ def detect_package_layout(package_root: Path) -> PackageLayout:
         commands_dir = local_commands
         agents_dir = local_agents
         plugins_dir = local_plugins
-        layout_kind = "project-local"
-        if runtime_root == source_runtime:
-            layout_kind = "source-package"
+        layout_kind = "source-package"
     else:
         commands_dir = global_commands
         agents_dir = global_agents

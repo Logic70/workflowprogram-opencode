@@ -202,15 +202,14 @@ package agents 是 WorkflowProgram 随包安装到 `.opencode/agents/*.md` 的 O
 └── .workflowprogram/
     └── package/
         ├── install-manifest.json
-        ├── .venv/                  # optional
-        └── runtime/
+        └── .venv/                  # optional
 ```
 
 注意：
 
-- package runtime 位于 `.workflowprogram/package/runtime/`
+- 引擎（Python runtime）从全局缓存运行，不再复制到目标项目
+- `.workflowprogram/package/install-manifest.json` 仅包含安装元数据，不包含引擎代码
 - 生成的目标工作流 runtime 位于 `.workflowprogram/runtime/`
-- 这两个路径是刻意隔离的，避免产品包和生成物互相覆盖
 - 生成的目标工作流存在性只以 `.workflowprogram/design/workflow-spec.yaml` 为准；`.workflowprogram/package/*`、`.workflowprogram/runtime/*` 或 `.workflowprogram/runs/*` 单独存在时不能作为 evolve/iterate/hotfix/ship 的依据
 
 ## 当前状态

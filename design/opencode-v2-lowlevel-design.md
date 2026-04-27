@@ -76,7 +76,7 @@
 - 依赖 OpenCode 已安装。
 - 依赖 `python3` 可运行 runtime / validator 脚本。
 - runtime 当前依赖 `PyYAML`，并通过 `requirements.txt` 显式声明。
-- 安装器可选创建 `.workflowprogram/package/.venv`，并把后续命令执行绑定到该解释器。
+- 安装器可选在用户级 cache 内创建 `.workflowprogram/.venv`，并把后续命令执行绑定到该解释器；项目本地不再持有 runtime 或 venv。
 - WorkflowProgram 产品命令只允许来自 `.opencode/commands/*.md`。
 - WorkflowProgram package plugin 必须可被 `.opencode/plugins/` 自动加载。
 - `workflow-spec.yaml` 只描述目标工作流语义，不承载产品包契约。
@@ -86,6 +86,15 @@
 - v1 不依赖 `dist/opencode/`，但需要安装脚本把 `package/` 物化成宿主可发现布局。
 - 为改善新项目使用体验，允许安装全局 bootstrap；但 bootstrap 不等同于完整 WorkflowProgram 全局安装。
 - 全局 bootstrap 默认写入 OpenCode global `commands/` 和 `.workflowprogram/bootstrap/`，完整 package 写入用户级 cache。
+
+#### 架构决策：Engine-in-Cache 模型
+
+为解决 AI 代理在目标项目中混淆 WorkflowProgram 引擎文件与目标工作流文件的问题，v2 采用 **engine-in-cache** 架构：
+
+- **核心原则**：Python 引擎 runtime 始终留在用户级 cache（`~/.cache/workflowprogram-opencode/packages/<version>/package/.workflowprogram/runtime/`），不复制到项目本地。
+- **项目本地内容**：目标项目只持有 `.opencode/{commands,agents,plugins}` 资产，不持有 `.workflowprogram/package/*` 目录。
+- **动机**：AI 代理在浏览项目文件树时容易误将 `.workflowprogram/package/runtime/` 中的引擎脚本当作目标工作流相关文件进行编辑或引用。通过将引擎隔离到 cache，项目文件树只呈现目标工作流资产，路径语义更清晰。
+- **影响**：`WP_PACKAGE_ROOT` 概念调整为指向 cache 位置而非项目根；所有 runtime 路径引用需指向 cache；venv 创建于 cache 内而非项目本地。
 
 #### 硬件限制
 
