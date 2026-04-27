@@ -82,9 +82,11 @@
 - WorkflowProgram package plugin 是 v1 必需资产，但 target workflow 是否生成 plugin 由目标 spec 决定。
 - package plugin 与 target plugin 必须具备不同逻辑标识，避免 hook 与 tool 冲突。
 - target commands 必须避免复用 `/wp-*` 产品命名空间。
+- 目标工作流存在性只以 `TARGET_ROOT/.workflowprogram/design/workflow-spec.yaml` 为准；package manifest、package runtime、target runtime wrapper 或 runs 目录都不能单独作为 evolve/iterate/hotfix/ship 的路由依据。
 - `project-local` 安装允许 package commands/plugins 与 target commands/plugins 共存于同一项目根，但 package runtime 必须位于 `.workflowprogram/package/runtime/`，不得与 target runtime 共用路径。
 - 全局 bootstrap 只允许安装 `/wp-install`、`/wp-status`、`/wp-upgrade`、`/wp-uninstall` 以及 bootstrap runtime；不得全局安装完整 lifecycle commands、agents 或 package plugin。
 - 用户级 package cache 只能作为安装源，不作为运行时真源；项目一旦安装完成，运行时应以项目本地 manifest 和 `.workflowprogram/package/runtime/` 为准。
+- status 与 orchestrate 输出必须同时暴露 `project_package_installed` 与 `target_workflow_exists`，禁止用泛化的 `.workflowprogram` 目录推断状态。
 - package runtime 的 Python 依赖必须显式声明；v1 通过 `requirements.txt` 声明，并允许安装器创建 `.workflowprogram/package/.venv` 作为专用解释器。
 - 任何运行时依赖的 validator 脚本都必须随 `WP_PACKAGE_ROOT` 一起交付，不得依赖仓库根目录中的额外源码。
 - 所有目标写入必须先生成 candidate，再执行 managed apply。
@@ -524,7 +526,7 @@ graph TB
 | Product Orchestrator | 识别用户意图并路由到 develop/validate/preflight/hotfix/iterate/ship/audit/evolve | `Orchestrator.Route` | 设计控制层 |
 | Intent Contract Registry | 维护 command、runtime intent、spec flow 的一致性 | `IntentContract.Resolve` | 设计控制层 |
 | Agent Role Registry | 维护 agent 的角色、阶段、能力、触发条件 | `AgentRole.Resolve` | 设计控制层 |
-| Agent Team Planner | 根据目标工作流阶段规划 agentteam，决定 subagent 调用顺序和汇聚策略 | `AgentTeam.Plan` | 设计控制层 |
+| Agent Team Planner | 根据目标工作流阶段规划 agentteam，生成 host-mediated subagent 调度建议和汇聚策略 | `AgentTeam.Plan` | 设计控制层 |
 | Host Isolation Doctor | 检查宿主配置污染、全局资产串入、OpenCode 版本与 reload 状态 | `HostIsolation.Check` | OM层 |
 | Target Host Smoke Runner | 验证 target command/plugin 被真实 OpenCode host 发现 | `TargetHostSmoke.Run` | 校验层 |
 | Release Builder | 生成干净发布包和完整性清单 | `Release.Build` | 构建层 |
@@ -554,6 +556,7 @@ graph TB
 | OpenCode package 是否仍是独立项目 | 是；所有新增能力必须先落到 OpenCode 独立仓库的 package/runtime/docs/spec |
 | `audit` 不一致如何处理 | 必须补 `/wp-audit` 与 runtime handler，或移除 spec 中的 `audit` flow；优先补齐 |
 | agentteam 与 subagent 是否等价 | 不等价；agentteam 是阶段职责与团队结构，subagent 是执行机制 |
+| runtime 是否直接执行 OpenCode subagent | v1 不直接执行；runtime 生成 `team-plan.json/md`，由 OpenCode host 或用户按建议显式调用 package agent，并以独立 agent 输出作为执行证据 |
 | target host smoke 是否替代 package host smoke | 不替代；二者分别验证产品包可见性和目标工作流可见性 |
 | release build 是否替代 `package/` 部署源 | 不替代 v1 安装路径；作为发布和 CI 的干净产物来源 |
     A0 --> A3

@@ -15,11 +15,11 @@ from runtime_common import (
     FAILURE_KINDS,
     MANDATORY_DESIGN_FILES,
     MANDATORY_RUNTIME_FILES,
-    MANDATORY_TARGET_FILES,
     PRODUCT_INTENT_CONTRACT,
     SCHEMA_VERSION,
     STAGE_SLOTS,
     DevelopRequest,
+    assess_target_workflow,
     aggregate_verdicts,
     append_jsonl,
     detect_package_layout,
@@ -223,14 +223,16 @@ def _collect_existing_assets(target_root: Path) -> dict[str, Any]:
         for path in target_root.glob(".workflowprogram/**/*")
         if path.is_file()
     )
-    present_required = [path for path in MANDATORY_TARGET_FILES if (target_root / path).is_file()]
-    missing_required = [path for path in MANDATORY_TARGET_FILES if not (target_root / path).is_file()]
+    target_status = assess_target_workflow(target_root)
     return {
         "existing_opencode": existing_opencode,
         "existing_workflowprogram": existing_workflowprogram,
-        "present_required_target_files": present_required,
-        "missing_required_target_files": missing_required,
-        "existing_workflow_spec": (target_root / ".workflowprogram" / "design" / "workflow-spec.yaml").is_file(),
+        "present_required_target_files": target_status["present_required_target_files"],
+        "missing_required_target_files": target_status["missing_required_target_files"],
+        "existing_workflow_spec": target_status["target_workflow_exists"],
+        "target_workflow_exists": target_status["target_workflow_exists"],
+        "target_workflow_complete": target_status["target_workflow_complete"],
+        "target_workflow_status": target_status,
     }
 
 
@@ -417,8 +419,11 @@ def _write_team_plan(run: RunContext) -> dict[str, str]:
     planner_module = _load_runtime_module("agent-team-planner.py", "workflowprogram_agent_team_planner")
     team_plan = planner_module.plan_team(Path(run.package.package_root), run.intent)
     team_plan_path = Path(run.run_root) / "outputs" / "team-plan.json"
+    team_plan_markdown_path = Path(run.run_root) / "outputs" / "team-plan.md"
     write_json(team_plan_path, team_plan)
-    return {"team_plan": str(team_plan_path)}
+    if hasattr(planner_module, "team_plan_markdown"):
+        write_text(team_plan_markdown_path, planner_module.team_plan_markdown(team_plan))
+    return {"team_plan": str(team_plan_path), "team_plan_guide": str(team_plan_markdown_path)}
 
 
 def _build_workflow_spec(
@@ -958,6 +963,7 @@ def _run_mutation_intent(
     existing_assets = _collect_existing_assets(target_root_path)
     if latest_run:
         existing_assets["latest_prior_run"] = latest_run
+    existing_assets["team_plan"] = team_plan_outputs
 
     if require_existing_spec and not existing_spec:
         _write_stage_summary(
@@ -1158,6 +1164,7 @@ def _run_mutation_intent(
         "spec_path": str(Path(run.target.design_root) / "workflow-spec.yaml"),
         "managed_apply": apply_result,
         "diagnostics": diagnostic_outputs,
+        "team_plan": team_plan_outputs,
         "validation": validation_summary,
         "judge": judge_summary,
         "exit_code": 0 if final_verdict != "FAIL" else 1,
@@ -1250,6 +1257,7 @@ def run_validate(package_root: Path, target_root: Path, user_arguments: str) -> 
         judge_summary.get("failure_kind"),
         "Validate pipeline completed.",
         diagnostics=diagnostic_outputs,
+        team_plan=team_plan_outputs,
         validation=validation_summary,
         judge=judge_summary,
     )
@@ -1259,6 +1267,7 @@ def run_validate(package_root: Path, target_root: Path, user_arguments: str) -> 
         "summary": "Layered validation completed.",
         "run_root": run.run_root,
         "diagnostics": diagnostic_outputs,
+        "team_plan": team_plan_outputs,
         "validation": validation_summary,
         "judge": judge_summary,
         "exit_code": 0 if judge_summary["verdict"] != "FAIL" else 1,
@@ -1380,6 +1389,7 @@ def run_audit(package_root: Path, target_root: Path, user_arguments: str) -> dic
         "summary": "Audit completed without mutating target assets.",
         "run_root": run.run_root,
         "diagnostics": diagnostic_outputs,
+        "team_plan": team_plan_outputs,
         "validation": validation_summary,
         "judge": judge_summary,
         "audit_report": str(run_root / "outputs" / "audit-report.json"),
@@ -1483,6 +1493,7 @@ def run_preflight(package_root: Path, target_root: Path, user_arguments: str) ->
         "summary": "Preflight readiness checks completed.",
         "run_root": run.run_root,
         "diagnostics": diagnostic_outputs,
+        "team_plan": team_plan_outputs,
         "validation": validation_summary,
         "judge": judge_summary,
         "exit_code": 0 if judge_summary["verdict"] != "FAIL" else 1,
@@ -1511,6 +1522,7 @@ def run_ship(package_root: Path, target_root: Path, user_arguments: str) -> dict
     if latest_run:
         existing_assets["latest_prior_run"] = latest_run
     existing_assets["diagnostic_outputs"] = diagnostic_outputs
+    existing_assets["team_plan"] = team_plan_outputs
     if not existing_assets["existing_workflow_spec"]:
         _write_stage_summary(
             run,
@@ -1589,6 +1601,7 @@ def run_ship(package_root: Path, target_root: Path, user_arguments: str) -> dict
         "summary": "Ship readiness confirmed." if ship_verdict == "PASS" else "Ship readiness blocked.",
         "run_root": run.run_root,
         "diagnostics": diagnostic_outputs,
+        "team_plan": team_plan_outputs,
         "validation": validation_summary,
         "judge": judge_summary,
         "exit_code": 0 if ship_verdict == "PASS" else 1,
@@ -1599,12 +1612,26 @@ def run_orchestrate(package_root: Path, target_root: Path, user_arguments: str) 
     run = _build_contexts(package_root, target_root, "orchestrate", user_arguments)
     _bootstrap_run(run)
     run_root = Path(run.run_root)
-    diagnostic_outputs = _write_diagnostic_artifacts(run, Path(run.package.package_root), Path(run.target.target_root))
+    target_root_path = Path(run.target.target_root)
+    diagnostic_outputs = _write_diagnostic_artifacts(run, Path(run.package.package_root), target_root_path)
     team_plan_outputs = _write_team_plan(run)
+    target_status = assess_target_workflow(target_root_path)
     route_module = _load_runtime_module("route-intent.py", "workflowprogram_route_intent")
     route = route_module.route_request(user_arguments)
     selected_intent = str(route.get("intent", "develop"))
     selected_contract = PRODUCT_INTENT_CONTRACT.get(selected_intent, {})
+    if selected_contract.get("requires_existing_target") and not target_status["target_workflow_exists"]:
+        route["original_intent"] = selected_intent
+        route["original_entry_command"] = selected_contract.get("command")
+        route["intent"] = "develop"
+        route["entry_command"] = PRODUCT_INTENT_CONTRACT["develop"]["command"]
+        route["reason"] = "target-workflow-missing-fallback-to-develop"
+        route["context_override"] = (
+            "The routed intent requires an existing generated target workflow, "
+            "but .workflowprogram/design/workflow-spec.yaml is missing."
+        )
+        selected_intent = "develop"
+        selected_contract = PRODUCT_INTENT_CONTRACT[selected_intent]
     mutating = bool(selected_contract.get("mutating"))
     needs_clarification = bool(route.get("ambiguous")) or float(route.get("confidence", 0.0)) < 0.7
     execute_allowed = False
@@ -1627,6 +1654,7 @@ def run_orchestrate(package_root: Path, target_root: Path, user_arguments: str) 
         "mutating": mutating,
         "needs_clarification": needs_clarification,
         "execute_allowed": execute_allowed,
+        "target_workflow_status": target_status,
         "summary": summary,
     }
     write_json(run_root / "outputs" / "orchestrate-route.json", routing_result)
@@ -1641,6 +1669,7 @@ def run_orchestrate(package_root: Path, target_root: Path, user_arguments: str) 
                 f"- Confidence: `{route.get('confidence')}`",
                 f"- Ambiguous: `{route.get('ambiguous')}`",
                 f"- Mutating: `{mutating}`",
+                f"- Target workflow exists: `{target_status['target_workflow_exists']}`",
                 f"- Action: {summary}",
                 "",
             ]
@@ -1660,6 +1689,7 @@ def run_orchestrate(package_root: Path, target_root: Path, user_arguments: str) 
         None,
         "Orchestrate routing completed.",
         diagnostics=diagnostic_outputs,
+        target_workflow_status=target_status,
         route=routing_result,
     )
     return {
@@ -1668,6 +1698,7 @@ def run_orchestrate(package_root: Path, target_root: Path, user_arguments: str) 
         "summary": summary,
         "run_root": run.run_root,
         "diagnostics": diagnostic_outputs,
+        "team_plan": team_plan_outputs,
         "route": routing_result,
         "exit_code": 0,
     }

@@ -121,6 +121,31 @@ MANDATORY_TARGET_FILES = MANDATORY_DESIGN_FILES + MANDATORY_RUNTIME_FILES + (
 )
 
 
+def assess_target_workflow(target_root: Path) -> dict[str, Any]:
+    """Return target-workflow state without treating package files as workflow evidence."""
+    resolved = target_root.resolve()
+    present_required = [path for path in MANDATORY_TARGET_FILES if (resolved / path).is_file()]
+    missing_required = [path for path in MANDATORY_TARGET_FILES if not (resolved / path).is_file()]
+    spec_path = resolved / ".workflowprogram" / "design" / "workflow-spec.yaml"
+    return {
+        "target_root": str(resolved),
+        "target_workflow_exists": spec_path.is_file(),
+        "target_workflow_complete": not missing_required,
+        "workflow_spec_path": ".workflowprogram/design/workflow-spec.yaml",
+        "workflow_spec_exists": spec_path.is_file(),
+        "present_required_target_files": present_required,
+        "missing_required_target_files": missing_required,
+        "package_install_manifest_exists": (resolved / INSTALL_MANIFEST_PATH).is_file(),
+        "package_runtime_exists": (resolved / ".workflowprogram" / "package" / "runtime").is_dir(),
+        "runs_root_exists": (resolved / ".workflowprogram" / "runs").is_dir(),
+        "boundary_note": (
+            "Only .workflowprogram/design/workflow-spec.yaml proves a generated target workflow exists; "
+            ".workflowprogram/package/*, .workflowprogram/runtime/*, and .workflowprogram/runs/* "
+            "are not target-workflow existence evidence by themselves."
+        ),
+    }
+
+
 @dataclass
 class PackageLayout:
     package_root: Path

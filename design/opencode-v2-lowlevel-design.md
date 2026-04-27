@@ -31,7 +31,7 @@
 | FR-13 | Install & Deploy | 通过安装脚本把 `package/` 部署成 OpenCode 可发现布局 |
 | FR-14 | Lifecycle Intent Closure | `audit`、`evolve`、`orchestrate` 与现有 intent 进入统一 command/runtime/spec contract |
 | FR-15 | Agent Role Schema | package agents 具备机器可读的角色、阶段、能力、触发条件和优先级 |
-| FR-16 | Agent Team Orchestration | runtime 能生成 team plan，并把 subagent 作为执行机制调用和汇聚 |
+| FR-16 | Agent Team Orchestration | runtime 能生成 team plan 与 host-mediated subagent 调度建议，并汇聚显式 agent 执行证据 |
 | FR-17 | Test Scenario Generation | 提供测试场景生成 agent 与 evidence 输出 |
 | FR-18 | Host Isolation Diagnosis | doctor 能识别外部 OpenCode/Claude/oh-my-opencode 资产串入风险 |
 | FR-19 | Host Compatibility Matrix | 记录 OpenCode 版本、plugin API、reload 要求和降级策略 |
@@ -403,6 +403,7 @@ sequenceDiagram
 | C-13 | release build 产物不得包含 `.workflowprogram/runs`、`__pycache__`、`node_modules`、本地 lock 或 provider token |
 | C-14 | schema migration 必须保留原始版本与迁移报告，不得静默改写用户无法追踪的状态 |
 | C-15 | managed apply 必须先加锁再写入，失败时产出可恢复状态 |
+| C-16 | 目标工作流存在性只由 `.workflowprogram/design/workflow-spec.yaml` 判定，禁止用泛化 `.workflowprogram` 路径推断 intent |
 | C-16 | 所有错误必须映射到统一 error code，不能只输出自由文本 |
 | C-17 | 日志和证据默认不得泄露 API key、token、完整敏感环境变量 |
 | C-18 | 离线安装路径不得强依赖实时网络；网络依赖只能作为可选加速路径 |
@@ -461,6 +462,7 @@ graph TB
 
 - 建立单一 `IntentContract`，记录每个 intent 的 command 文件、runtime id、是否变更目标项目、必须阶段、输出证据和允许失败类型。
 - `/wp-orchestrate` 调用 `route-intent.py`，根据用户自然语言选择 intent；若置信度不足则输出澄清问题，不直接执行变更型 intent。
+- `/wp-orchestrate` 必须叠加 `target_workflow_status`：当候选 intent 需要已有目标工作流，但 `TARGET_ROOT/.workflowprogram/design/workflow-spec.yaml` 不存在时，路由必须回退到 `develop`，并记录 `original_intent` 与 `context_override`。
 - `audit` 为非变更 intent，检查目标工作流设计、证据、host 加载和 lessons。
 - `evolve` 为受控变更 intent，必须基于 audit 或 validate 的证据生成变更计划，再走 managed apply。
 
@@ -478,8 +480,9 @@ graph TB
 #### 设计思路
 
 - agent 文件继续使用 OpenCode subagent 机制，但增加机器可读 frontmatter。
-- `agentteam` 由 runtime 生成 `team-plan.json`，描述阶段、角色、并行度、输入、输出、汇聚策略。
-- subagent 是执行手段；同一阶段可以无 agent、一个 agent、多个 agent 并行或多轮 fan-in。
+- `agentteam` 由 runtime 生成 `team-plan.json` 与 `team-plan.md`，描述阶段、角色、并行度、输入、输出、调度提示和汇聚策略。
+- subagent 是执行手段，但 v1 runtime 不直接调用 OpenCode subagent；OpenCode host 或用户需要按 `recommended_dispatch` 显式调用 package agent。
+- `team-plan` 是调度指南，不是执行证据；只有独立 agent 响应、dispatch trace 或 fan-in report 才能证明 subagent 已运行。
 - `workflow-designer` 负责设计，`workflow-validator` 负责契约校验，`workflow-verifier` 负责证据闭环，reviewer 负责专项审查，`test-scenario-generator` 负责场景覆盖。
 
 #### 推荐 agent frontmatter
@@ -573,6 +576,7 @@ fan_in: required
 - 用户在新项目运行 `/wp-install` 时，全局 command 调用 `bootstrap-runtime.py install --target-root "$PWD"`。
 - `bootstrap-runtime.py` 从 bootstrap manifest 定位 cache package，再复用 `package-deploy.py install --mode project-local` 完成项目安装。
 - `/wp-status`、`/wp-upgrade`、`/wp-uninstall` 只操作当前项目的 project-local install manifest。
+- `/wp-status` 必须同时输出 `project_package_installed` 与 `target_workflow_exists`，并明确 `.workflowprogram/package/*`、`.workflowprogram/runtime/*`、`.workflowprogram/runs/*` 不等于目标工作流存在。
 
 #### 实体关系分析
 

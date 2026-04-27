@@ -110,6 +110,11 @@ python D:\Code\workflowprogram-opencode\package\.workflowprogram\runtime\package
 python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py status --mode project-local --target-root <target-project-root>
 ```
 
+`status` 中有两个需要分开看的字段：
+
+- `project_package_installed`：当前项目是否已安装 WorkflowProgram 产品包。
+- `target_workflow_exists`：当前项目是否已有生成的目标工作流，只以 `.workflowprogram/design/workflow-spec.yaml` 为准。
+
 这种方式适合一次性安装、CI 或不想使用全局 bootstrap 的场景；日常新项目推荐方式一或方式二。
 
 ## 使用
@@ -141,6 +146,8 @@ python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py status --
 - `@test-scenario-generator`
 
 package agents 是 WorkflowProgram 随包安装到 `.opencode/agents/*.md` 的 OpenCode 角色定义。它们用于设计、校验、验证和专项评审，可以被 WorkflowProgram 的编排逻辑引用，也可以由用户按 OpenCode 的方式显式 `@` 调用。它们不是 agentteam 本身；agentteam 是运行时生成的团队计划和阶段职责，package agent 是其中可被调用的单个执行角色。
+
+运行时会在 `RUN_ROOT/outputs/team-plan.json` 和 `RUN_ROOT/outputs/team-plan.md` 生成 agentteam 调度建议。这个文件只是调度指南，不代表 subagent 已经执行；只有 OpenCode 实际调用 `@workflow-designer` 等 agent 并留下响应或调度记录后，才能认为该 agent 参与了运行。
 
 典型流程：
 
@@ -204,6 +211,7 @@ package agents 是 WorkflowProgram 随包安装到 `.opencode/agents/*.md` 的 O
 - package runtime 位于 `.workflowprogram/package/runtime/`
 - 生成的目标工作流 runtime 位于 `.workflowprogram/runtime/`
 - 这两个路径是刻意隔离的，避免产品包和生成物互相覆盖
+- 生成的目标工作流存在性只以 `.workflowprogram/design/workflow-spec.yaml` 为准；`.workflowprogram/package/*`、`.workflowprogram/runtime/*` 或 `.workflowprogram/runs/*` 单独存在时不能作为 evolve/iterate/hotfix/ship 的依据
 
 ## 当前状态
 

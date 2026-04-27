@@ -25,6 +25,7 @@ from runtime_common import (  # noqa: E402
     PACKAGE_PLUGIN_FILE,
     REQUIRED_PACKAGE_COMMANDS,
     SCHEMA_VERSION,
+    assess_target_workflow,
     default_bootstrap_cache_root,
     default_global_config_root,
     detect_package_layout,
@@ -108,6 +109,10 @@ If `python3` is not available on this host, retry once with `python`.
 
 Then:
 - Report the bootstrap verdict and install/status/upgrade/uninstall summary.
+- Interpret `project_package_installed=true` as the only proof that the WorkflowProgram package is installed in this project.
+- Interpret `target_workflow_exists=true` as the only proof that a generated target workflow exists; `.workflowprogram/package/*`, `.workflowprogram/runtime/*`, or `.workflowprogram/runs/*` alone do not prove that.
+- If `project_package_installed=false`, tell the user to run `/wp-install` before using lifecycle commands.
+- If `target_workflow_exists=false`, do not recommend `/wp-evolve`, `/wp-iterate`, `/wp-hotfix`, or `/wp-ship`; use `/wp-develop` for first-time workflow creation.
 - If the command installs or upgrades the package, tell the user to restart OpenCode or reopen the project so local `/wp-*` commands refresh.
 - If the command fails, surface the JSON `error`, `stderr`, or failed check directly.
 """
@@ -594,8 +599,94 @@ def uninstall_package(mode: str, target_root: str | None) -> dict[str, Any]:
     }
 
 
+def _project_package_install_status(install_root: Path) -> dict[str, Any]:
+    manifest_path = install_root / INSTALL_MANIFEST_PATH
+    manifest = None
+    if manifest_path.exists():
+        try:
+            manifest = read_json(manifest_path)
+        except Exception:
+            manifest = {"error": "manifest unreadable"}
+
+    commands_dir = install_root / ".opencode" / "commands"
+    agents_dir = install_root / ".opencode" / "agents"
+    plugins_dir = install_root / ".opencode" / "plugins"
+    plugin_file = _plugin_destination(install_root, "project-local")
+    runtime_root = _runtime_destination_root(install_root)
+    validator_path = runtime_root / "validators" / "package_contract_validator.py"
+    installed = manifest_path.is_file() and runtime_root.is_dir() and plugin_file.is_file()
+    return {
+        "installed": installed,
+        "manifest_path": str(manifest_path),
+        "manifest_exists": manifest_path.is_file(),
+        "manifest": manifest,
+        "commands_dir": str(commands_dir),
+        "agents_dir": str(agents_dir),
+        "plugins_dir": str(plugins_dir),
+        "plugin_file": str(plugin_file),
+        "plugin_exists": plugin_file.is_file(),
+        "runtime_root": str(runtime_root),
+        "runtime_exists": runtime_root.is_dir(),
+        "validator": (
+            {
+                "validator_path": str(validator_path),
+                "available": True,
+            }
+            if validator_path.is_file()
+            else None
+        ),
+    }
+
+
 def install_status(source_package_root: Path | None, mode: str, target_root: str | None) -> dict[str, Any]:
     install_root = _resolve_install_root(mode, target_root)
+    target_status = assess_target_workflow(install_root)
+    if mode == "project-local":
+        package_status = _project_package_install_status(install_root)
+        manifest = package_status["manifest"]
+        source_root = source_package_root.resolve() if source_package_root else None
+        summary = (
+            "WorkflowProgram package is installed in this project."
+            if package_status["installed"]
+            else "WorkflowProgram package is not installed in this project; run /wp-install before lifecycle commands."
+        )
+        return {
+            "action": "status",
+            "verdict": "PASS" if package_status["installed"] else "WARN",
+            "summary": summary,
+            "mode": mode,
+            "source_package_root": str(source_root) if source_root else None,
+            "install_root": str(install_root),
+            "layout_kind": "project-local" if package_status["installed"] else "not-installed",
+            "project_package_installed": package_status["installed"],
+            "target_workflow_exists": target_status["target_workflow_exists"],
+            "target_workflow_complete": target_status["target_workflow_complete"],
+            "package_install_status": package_status,
+            "target_workflow_status": target_status,
+            "commands_dir": package_status["commands_dir"],
+            "plugins_dir": package_status["plugins_dir"],
+            "runtime_root": package_status["runtime_root"],
+            "python_executable": manifest.get("python_executable") if isinstance(manifest, dict) else None,
+            "requirements_path": (
+                str(Path(package_status["runtime_root"]) / REQUIREMENTS_FILE)
+                if package_status["runtime_exists"]
+                else None
+            ),
+            "venv_root": (
+                str((install_root / manifest.get("venv_root")).resolve())
+                if isinstance(manifest, dict) and manifest.get("venv_root")
+                else None
+            ),
+            "manifest": manifest,
+            "validator": package_status["validator"],
+            "interpretation": [
+                "project_package_installed controls whether /wp-* package lifecycle commands are available in this project.",
+                "target_workflow_exists controls whether evolve/iterate/hotfix/ship can operate on a generated target workflow.",
+                "Do not infer either state from the existence of a generic .workflowprogram directory.",
+            ],
+            "exit_code": 0,
+        }
+
     layout = detect_package_layout(install_root)
     manifest = None
     if layout.install_manifest.exists():
@@ -630,6 +721,10 @@ def install_status(source_package_root: Path | None, mode: str, target_root: str
         ),
         "manifest": manifest,
         "validator": validator,
+        "project_package_installed": bool(manifest),
+        "target_workflow_exists": target_status["target_workflow_exists"],
+        "target_workflow_complete": target_status["target_workflow_complete"],
+        "target_workflow_status": target_status,
         "exit_code": 0,
     }
 
