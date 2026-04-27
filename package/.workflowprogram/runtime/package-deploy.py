@@ -628,7 +628,7 @@ def install_status(source_package_root: Path | None, mode: str, target_root: str
                 else None
             ),
             "manifest": manifest,
-            "validator": package_status["validator"],
+            "validator": None,
             "interpretation": [
                 "project_package_installed controls whether /wp-* package lifecycle commands are available in this project.",
                 "target_workflow_exists controls whether evolve/iterate/hotfix/ship can operate on a generated target workflow.",
