@@ -1,0 +1,4 @@
+id: add-ai-collaboration-layer
+status: implemented
+title: Add explicit OpenCode AI collaboration layer for WorkflowProgram commands
+owner: workflowprogram-opencode

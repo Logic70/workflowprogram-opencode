@@ -44,6 +44,7 @@ v1 实施目标如下：
 | IP-12 | release artifact 可复现 | 能生成干净 `dist/opencode/` 或 archive 并校验 manifest/checksum |
 | IP-13 | 契约硬化落地 | schema version、migration、error code、apply recovery、permission/privacy 策略进入 validator |
 | IP-14 | 新项目全局引导安装 | 全局只安装 bootstrap，完整 package 仍通过 project-local 物化到当前项目 |
+| IP-15 | AI 协作层可追踪 | package command 能调度 OpenCode package agents，并把 agent 证据写入 run-state |
 
 ## 3. 实施边界
 
@@ -323,14 +324,23 @@ v1 实施目标如下：
 - `workflowprogram.ts` 只做 bridge
 - runtime 主链仍以 Python 脚本承载
 
+### 风险 6：目标工作流生成退化为 Python-only
+
+对策：
+
+- package command 先运行 `agent-team-planner.py`，明确 pre-runtime 与 post-runtime agent 调度
+- 变更型 intent 必须先尝试调度设计类 package agent，无法调度时报告 `AI-DISPATCH-SKIPPED`
+- runtime 通过 `--ai-evidence` 记录 agent 摘要，但不允许 agent 证据绕过 validator 或 managed apply
+
 ## 8. 建议执行顺序
 
 1. 完成 P1，先让 package 能被宿主识别
 2. 完成 P2，先让 `/wp-develop` 能进入 runtime
-3. 完成 P3，先生成最小 target design assets
-4. 完成 P4，形成最小 target bundle 与 managed apply
-5. 完成 P5，建立 `/wp-validate` 的分层校验能力
-6. 完成 P6，建立 smoke 闭环
+3. 完成 P8 的 AI 协作层最小能力，让 `/wp-develop` 先有 agent 设计证据再进入 runtime
+4. 完成 P3，生成最小 target design assets
+5. 完成 P4，形成最小 target bundle 与 managed apply
+6. 完成 P5，建立 `/wp-validate` 的分层校验能力
+7. 完成 P6，建立 smoke 闭环
 
 ## 10. 能力差距闭环实施计划
 
@@ -362,6 +372,7 @@ v1 实施目标如下：
 
 - 把 package agents 从静态文件集合升级为可编排团队结构。
 - 明确 agentteam 与 subagent 的区别。
+- 明确 AI 协作层与 Python runtime 的职责：agents 产出设计/评审证据，runtime 负责确定性固化、校验和写入。
 
 任务：
 
@@ -369,14 +380,17 @@ v1 实施目标如下：
 2. 为现有 agents 增加角色元数据
 3. 新增 `test-scenario-generator`
 4. 实现 `agent-team-planner.py`
-5. 输出 `team-plan.json`、dispatch trace、fan-in report
-6. 增加 package validator 对 role registry 的校验
+5. 为 `recommended_dispatch` 增加 `pre-runtime` / `post-runtime` 调度时机
+6. 输出 `team-plan.json`、`team-plan.md`、dispatch trace、fan-in report
+7. 增加 `workflow-entry.py --ai-evidence`，把 host-mediated agent 摘要写入 run-state
+8. 增加 package validator 对 role registry 的校验
 
 验收：
 
 - 一个阶段可配置零个、一个或多个 agent
 - 多 reviewer 场景能生成 fan-in evidence
 - role 引用不存在时 validator fail
+- `/wp-develop` 等变更型命令先调度 pre-runtime 设计 agent，再进入 Python runtime
 
 ### P9 宿主隔离与兼容诊断
 

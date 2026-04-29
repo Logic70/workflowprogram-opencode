@@ -35,7 +35,7 @@
 **链路 B：目标工作流生成链**
 
 - 输入：用户需求、目标项目路径、执行约束
-- 处理：需求澄清 -> 设计 -> 目标 bundle 生成 -> managed apply -> 验证 -> lessons
+- 处理：需求澄清 -> AI 设计/评审证据 -> runtime 固化 spec -> 目标 bundle 生成 -> managed apply -> 验证 -> lessons
 - 输出：`TARGET_ROOT/.opencode/*`、`TARGET_ROOT/.workflowprogram/*`、`RUN_ROOT/*`
 
 **链路 C：全局轻量部署链**
@@ -69,6 +69,7 @@
 | AR-19 | 平台边界明确 | WSL/Windows 路径、离线依赖、OpenCode 版本兼容和 plugin reload 规则必须显式记录 |
 | AR-20 | 能力差距可追踪 | ClaudeCode 到 OpenCode 的能力映射必须维护为设计资产，明确已实现、不适用、待规划和替代实现 |
 | AR-21 | 全局部署器轻量化 | 为改善新项目体验，可提供全局 bootstrap，但完整 WorkflowProgram 仍必须物化为 project-local 安装 |
+| AR-22 | AI 协作层显式化 | `/wp-*` 命令必须把 OpenCode package agents 作为 AI 协作层接入，Python runtime 只负责确定性固化、校验和写入 |
 
 ### 架构级原则与约束
 
@@ -83,11 +84,13 @@
 - package plugin 与 target plugin 必须具备不同逻辑标识，避免 hook 与 tool 冲突。
 - target commands 必须避免复用 `/wp-*` 产品命名空间。
 - 目标工作流存在性只以 `TARGET_ROOT/.workflowprogram/design/workflow-spec.yaml` 为准；package manifest、package runtime、target runtime wrapper 或 runs 目录都不能单独作为 evolve/iterate/hotfix/ship 的路由依据。
-- `project-local` 安装允许 package commands/plugins 与 target commands/plugins 共存于同一项目根；package runtime 始终留在用户级 cache，不复制到项目本地，避免与 target runtime 混淆。
+- `project-local` 安装允许 package commands/plugins 与 target commands/plugins 共存于同一项目根，但 package runtime 必须位于 `.workflowprogram/package/runtime/`，不得与 target runtime 共用路径。
 - 全局 bootstrap 只允许安装 `/wp-install`、`/wp-status`、`/wp-upgrade`、`/wp-uninstall` 以及 bootstrap runtime；不得全局安装完整 lifecycle commands、agents 或 package plugin。
-- 用户级 package cache 作为运行时真源；项目本地只部署 `.opencode/` 命令与插件资产，不复制 runtime。运行时以用户级 cache 中的 package runtime 为准。
+- 用户级 package cache 只能作为安装源，不作为运行时真源；项目一旦安装完成，运行时应以项目本地 manifest 和 `.workflowprogram/package/runtime/` 为准。
 - status 与 orchestrate 输出必须同时暴露 `project_package_installed` 与 `target_workflow_exists`，禁止用泛化的 `.workflowprogram` 目录推断状态。
 - package runtime 的 Python 依赖必须显式声明；v1 通过 `requirements.txt` 声明，并允许安装器创建 `.workflowprogram/package/.venv` 作为专用解释器。
+- package command 必须先通过 `agent-team-planner.py` 或 `team-plan` 明确 agent 调度建议；pre-runtime agent 证据可通过 `--ai-evidence` 进入 runtime 证据链。
+- Python runtime 不直接调用 OpenCode subagent；OpenCode host 或用户显式调用 package agents，runtime 记录和校验可回放证据。
 - 任何运行时依赖的 validator 脚本都必须随 `WP_PACKAGE_ROOT` 一起交付，不得依赖仓库根目录中的额外源码。
 - 所有目标写入必须先生成 candidate，再执行 managed apply。
 - 所有运行态结论都必须能够由 `RUN_ROOT` 证据回放。
@@ -271,7 +274,7 @@ graph TB
 | 真源命令目录 | `project-local`: `WP_PACKAGE_ROOT/.opencode/commands/`; `global`: `WP_PACKAGE_ROOT/commands/` |
 | 真源 agents 目录 | `project-local`: `WP_PACKAGE_ROOT/.opencode/agents/`; `global`: `WP_PACKAGE_ROOT/agents/` |
 | 真源插件目录 | `project-local`: `WP_PACKAGE_ROOT/.opencode/plugins/`; `global`: `WP_PACKAGE_ROOT/plugins/` |
-| 真源运行时目录 | 用户级 cache: `~/.cache/workflowprogram-opencode/packages/<version>/package/.workflowprogram/runtime/`（`WP_PACKAGE_ROOT` 指向 cache） |
+| 真源运行时目录 | `WP_PACKAGE_ROOT/.workflowprogram/package/runtime/` |
 | 部署源目录 | 仓库内 `package/.workflowprogram/runtime/` 作为安装源，不直接等同于已安装布局 |
 | 产品命令命名空间 | `/wp-*` |
 | 产品 agents 形态 | v1 必需，作为 package review/analysis 能力集随产品包交付 |
@@ -338,7 +341,7 @@ graph TB
 运行框架规则：
 
 - OpenCode 只直接加载 `WP_PACKAGE_ROOT` 或 `TARGET_ROOT` 中的 OpenCode 资产。
-- WorkflowProgram package runtime 始终位于用户级 cache（`WP_PACKAGE_ROOT/.workflowprogram/runtime/`），不复制到项目本地。
+- WorkflowProgram package runtime 在部署后位于 `WP_PACKAGE_ROOT/.workflowprogram/package/runtime/`。
 - 目标工作流 runtime wrapper 位于 `TARGET_ROOT/.workflowprogram/runtime/`。
 - WorkflowProgram package plugin 与 target workflow plugin 不能共享文件名、逻辑 id 或职责。
 
@@ -448,15 +451,15 @@ v1 采用 `source-as-deployment-source` 模式。
 
 | 模式 | 路径 | 用途 |
 |---|---|---|
-| project-local | `PROJECT_ROOT/.opencode/{commands,agents,plugins}`（runtime 留在 cache） | 当前项目内安装与直接使用，runtime 由 cache 供应 |
-| global | `GLOBAL_ROOT/{commands,plugins}` + 用户级 cache runtime | 全局 bootstrap，完整 package runtime 仍由 cache 供应 |
+| project-local | `PROJECT_ROOT/.opencode/{commands,plugins}` + `PROJECT_ROOT/.workflowprogram/package/runtime/` | 当前项目内安装与直接使用 |
+| global | `GLOBAL_ROOT/{commands,plugins}` + `GLOBAL_ROOT/.workflowprogram/package/runtime/` | 全局安装，供多个项目复用 |
 
 安装规则：
 
-- 安装器只部署 WorkflowProgram 产品命令、产品 agents、产品插件到项目 `.opencode/`；package runtime 始终留在用户级 cache，不复制到项目本地。
+- 安装器部署 WorkflowProgram 产品命令、产品 agents、产品插件和 package runtime。
 - `project-local` 安装允许 package commands/plugins 与后续生成的 target commands/plugins 共存于同一项目根目录。
-- package runtime 始终留在用户级 cache（`~/.cache/workflowprogram-opencode/packages/<version>/package/.workflowprogram/runtime/`），与 target `.workflowprogram/runtime/` 路径自然隔离，避免 AI 混淆引擎文件与目标工作流文件。
-- package runtime 依赖通过 cache 内的 `.workflowprogram/runtime/requirements.txt` 声明；安装器可选在 cache 内创建 `.workflowprogram/.venv`，并在 install manifest 中记录 `python_executable` 指向 cache 中的 venv。
+- package runtime 固定落在 `.workflowprogram/package/runtime/`，用于与 target `.workflowprogram/runtime/` 做路径隔离。
+- package runtime 依赖通过 `.workflowprogram/package/runtime/requirements.txt` 声明；安装器可选创建 `.workflowprogram/package/.venv`，并在 install manifest 中记录 `python_executable`。
 - 安装器以保守合并策略更新 `opencode.json`，并写出 install manifest 以支持状态检查和卸载。
 
 目标工作流只允许一种交付模型：

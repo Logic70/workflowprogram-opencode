@@ -10,6 +10,7 @@ Rules:
 - Do not mutate target assets from the command body.
 - Ship requires an existing generated target workflow.
 - Existing generated target workflow means `.workflowprogram/design/workflow-spec.yaml`, not `.workflowprogram/package/*`, `.workflowprogram/runtime/*`, or `.workflowprogram/runs/*` alone.
+- Use package agents as the AI collaboration layer after deterministic ship-readiness evidence exists.
 
 Run this first:
 
@@ -19,6 +20,7 @@ Run this first:
 
 Then:
 - Report whether ship readiness is confirmed or blocked.
-- Report `team_plan.team_plan_guide` when present as the stage/agent dispatch guide; do not claim package agents ran unless separate agent output exists.
+- Dispatch `post-runtime` agents from `team_plan.team_plan_guide` when present.
+- Do not claim package agents ran unless separate agent output exists.
 - Surface validation blockers directly instead of paraphrasing them away.
 - If the script exits non-zero, report failure explicitly.

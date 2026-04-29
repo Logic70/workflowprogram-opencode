@@ -65,6 +65,7 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
     clarification_ok = True
     clarification_content_ok = True
     team_plan_ok = False
+    ai_collaboration_ok = False
     apply_recovery_ok = True
     schema_version_ok = True
     if context_path.is_file() and state_path.is_file() and events_path.is_file():
@@ -80,6 +81,12 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
             context.get("run_root") == str(resolved)
             and state.get("run_root") == str(resolved)
             and bool(events)
+        )
+        ai_collaboration = state.get("ai_collaboration")
+        ai_collaboration_ok = (
+            isinstance(context.get("ai_evidence"), str)
+            and isinstance(ai_collaboration, dict)
+            and isinstance(ai_collaboration.get("evidence_supplied"), bool)
         )
         current_progress = progress_root / "current-progress.json"
         milestones = progress_root / "milestones.jsonl"
@@ -209,6 +216,14 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
             "AGT-02",
             team_plan_ok,
             f"team_plan={team_plan_path}",
+            "orchestration",
+        )
+    )
+    checks.append(
+        _check(
+            "AGT-03",
+            ai_collaboration_ok,
+            "context.ai_evidence and state.ai_collaboration must record host-mediated agent evidence state",
             "orchestration",
         )
     )

@@ -36,7 +36,6 @@ from runtime_common import (  # noqa: E402
     write_json,
 )
 
-# Engine-in-cache model: Python runtime stays at source_package_root, never copied to target project
 
 BACKUP_CONFIG_PATH = ".workflowprogram/package/opencode.json.backup"
 VENV_RELATIVE_PATH = ".workflowprogram/package/.venv"
@@ -275,10 +274,7 @@ def _installed_agent_paths(root: Path, mode: str, source_layout: Any) -> list[tu
     return files
 
 
-# Deprecated in engine-in-cache model; kept for reference only
 def _runtime_destination_root(root: Path) -> Path:
-    """Deprecated in engine-in-cache model (deepseek).
-    Engine runtime stays at source/cache, never copied to target project."""
     return root / ".workflowprogram" / "package" / "runtime"
 
 
@@ -306,6 +302,13 @@ def _plan_install(source_root: Path, install_root: Path, mode: str) -> dict[str,
     source_layout = detect_package_layout(source_root)
     command_files = _installed_command_paths(install_root, mode, source_layout)
     agent_files = _installed_agent_paths(install_root, mode, source_layout)
+    runtime_dest_root = _runtime_destination_root(install_root)
+
+    runtime_files: list[tuple[Path, str]] = []
+    for runtime_file in _iter_runtime_files(source_layout.runtime_root):
+        relative = runtime_file.relative_to(source_layout.runtime_root)
+        destination = runtime_dest_root / relative
+        runtime_files.append((runtime_file, str(destination.relative_to(install_root).as_posix())))
 
     plugin_destination = _plugin_destination(install_root, mode)
     return {
@@ -314,14 +317,18 @@ def _plan_install(source_root: Path, install_root: Path, mode: str) -> dict[str,
         "mode": mode,
         "command_files": command_files,
         "agent_files": agent_files,
+        "runtime_files": runtime_files,
         "plugin_file": (source_layout.plugin_file, str(plugin_destination.relative_to(install_root).as_posix())),
         "config_path": install_root / "opencode.json",
         "manifest_path": install_root / INSTALL_MANIFEST_PATH,
         "backup_config_path": install_root / BACKUP_CONFIG_PATH,
+        "venv_root": _venv_root(install_root),
+        "requirements_relative": str((runtime_dest_root / REQUIREMENTS_FILE).relative_to(install_root).as_posix()),
+        "requirements_lock_relative": str((runtime_dest_root / REQUIREMENTS_LOCK_FILE).relative_to(install_root).as_posix()),
     }
 
 
-def _detect_unmanaged_conflicts(plan: dict[str, Any], force: bool) -> list[str]:
+def _detect_unmanaged_conflicts(plan: dict[str, Any], force: bool, create_venv: bool) -> list[str]:
     if force:
         return []
     manifest_path: Path = plan["manifest_path"]
@@ -337,6 +344,9 @@ def _detect_unmanaged_conflicts(plan: dict[str, Any], force: bool) -> list[str]:
     all_targets = [relative for _, relative in plan["command_files"]]
     all_targets.extend(relative for _, relative in plan["agent_files"])
     all_targets.append(plan["plugin_file"][1])
+    all_targets.extend(relative for _, relative in plan["runtime_files"])
+    if create_venv:
+        all_targets.append(str(plan["venv_root"].relative_to(plan["install_root"]).as_posix()))
 
     for relative in all_targets:
         target_path = plan["install_root"] / relative
@@ -383,8 +393,7 @@ def install_package(
     _assert_installable_target(source_root, install_root, mode)
     plan = _plan_install(source_root, install_root, mode)
 
-    # Engine-in-cache model (deepseek): no runtime files or venv in target project
-    conflicts = _detect_unmanaged_conflicts(plan, force)
+    conflicts = _detect_unmanaged_conflicts(plan, force, create_venv)
     if conflicts:
         return {
             "action": "install",
@@ -430,7 +439,34 @@ def install_package(
     _copy_file(source_plugin, install_root / plugin_relative)
     installed_files.append(plugin_relative)
 
-    # Venv provisioning moved to bootstrap-runtime.py; installed at source_package_root
+    for source, relative in plan["runtime_files"]:
+        _copy_file(source, install_root / relative)
+        installed_files.append(relative)
+
+    selected_python = python_executable or sys.executable
+    venv_info: dict[str, Any] | None = None
+    requirements_relative = plan["requirements_lock_relative"] if use_lock else plan["requirements_relative"]
+    if create_venv:
+        provisioned, venv_info = _provision_venv(
+            base_python=selected_python,
+            venv_root=plan["venv_root"],
+            requirements_path=install_root / requirements_relative,
+        )
+        if not provisioned:
+            return {
+                "action": "install",
+                "verdict": "FAIL",
+                "summary": "WorkflowProgram venv provisioning failed.",
+                "mode": mode,
+                "source_package_root": str(source_root),
+                "install_root": str(install_root),
+                "runtime_root": str(_runtime_destination_root(install_root)),
+                "venv_root": str(plan["venv_root"]),
+                "python_executable": selected_python,
+                "venv_error": venv_info,
+                "exit_code": 3,
+            }
+        selected_python = str(_venv_python(plan["venv_root"]))
 
     manifest = {
         "schema_version": SCHEMA_VERSION,
@@ -447,10 +483,17 @@ def install_package(
         ),
         "created_config": source_config if config_status == "created" else None,
         "installed_files": sorted(installed_files),
-        "managed_directories": [],
+        "managed_directories": (
+            [str(plan["venv_root"].relative_to(install_root).as_posix())] if create_venv else []
+        ),
         "required_package_commands": list(REQUIRED_PACKAGE_COMMANDS),
-        "create_venv": False,
-        "python_executable": python_executable or sys.executable,
+        "requirements_relative": requirements_relative,
+        "requirements_mode": "lock" if use_lock else "range",
+        "create_venv": create_venv,
+        "venv_root": (
+            str(plan["venv_root"].relative_to(install_root).as_posix()) if create_venv else None
+        ),
+        "python_executable": selected_python,
         "warnings": warnings,
     }
     write_json(plan["manifest_path"], manifest)
@@ -462,10 +505,12 @@ def install_package(
         "mode": mode,
         "source_package_root": str(source_root),
         "install_root": str(install_root),
+        "runtime_root": str(_runtime_destination_root(install_root)),
         "config_status": config_status,
-        "python_executable": python_executable or sys.executable,
-        "create_venv": False,
-        "venv_root": None,
+        "python_executable": selected_python,
+        "create_venv": create_venv,
+        "venv_root": str(plan["venv_root"]) if create_venv else None,
+        "venv_info": venv_info,
         "warnings": warnings,
         "installed_files": sorted(installed_files),
         "manifest_path": str(plan["manifest_path"]),
@@ -536,7 +581,8 @@ def uninstall_package(mode: str, target_root: str | None) -> dict[str, Any]:
             shutil.rmtree(directory, ignore_errors=True)
             removed_directories.append(relative)
 
-    # Engine-in-cache model (deepseek): no runtime files in project to prune
+    runtime_root = _runtime_destination_root(install_root)
+    _prune_empty_dirs(runtime_root, install_root)
     _prune_empty_dirs((install_root / ".opencode" / "commands") if mode == "project-local" else (install_root / "commands"), install_root)
     _prune_empty_dirs((install_root / ".opencode" / "agents") if mode == "project-local" else (install_root / "agents"), install_root)
     _prune_empty_dirs((install_root / ".opencode" / "plugins") if mode == "project-local" else (install_root / "plugins"), install_root)
@@ -566,11 +612,9 @@ def _project_package_install_status(install_root: Path) -> dict[str, Any]:
     agents_dir = install_root / ".opencode" / "agents"
     plugins_dir = install_root / ".opencode" / "plugins"
     plugin_file = _plugin_destination(install_root, "project-local")
-    # Engine-in-cache model (deepseek): runtime lives in cache, not project.
-    # Installation is valid when manifest + plugin exist, regardless of local runtime.
-    installed = manifest_path.is_file() and plugin_file.is_file()
-    source_root = manifest.get("source_package_root") if isinstance(manifest, dict) else None
-    runtime_dir = Path(source_root) / ".workflowprogram" / "runtime" if source_root else None
+    runtime_root = _runtime_destination_root(install_root)
+    validator_path = runtime_root / "validators" / "package_contract_validator.py"
+    installed = manifest_path.is_file() and runtime_root.is_dir() and plugin_file.is_file()
     return {
         "installed": installed,
         "manifest_path": str(manifest_path),
@@ -581,10 +625,16 @@ def _project_package_install_status(install_root: Path) -> dict[str, Any]:
         "plugins_dir": str(plugins_dir),
         "plugin_file": str(plugin_file),
         "plugin_exists": plugin_file.is_file(),
-        "source_package_root": str(source_root) if source_root else None,
-        "runtime_root": str(runtime_dir) if runtime_dir else None,
-        "runtime_exists": runtime_dir.is_dir() if runtime_dir else False,
-        "engine_note": "Runtime engine runs from cache/source package, not from target project.",
+        "runtime_root": str(runtime_root),
+        "runtime_exists": runtime_root.is_dir(),
+        "validator": (
+            {
+                "validator_path": str(validator_path),
+                "available": True,
+            }
+            if validator_path.is_file()
+            else None
+        ),
     }
 
 
@@ -628,7 +678,7 @@ def install_status(source_package_root: Path | None, mode: str, target_root: str
                 else None
             ),
             "manifest": manifest,
-            "validator": None,
+            "validator": package_status["validator"],
             "interpretation": [
                 "project_package_installed controls whether /wp-* package lifecycle commands are available in this project.",
                 "target_workflow_exists controls whether evolve/iterate/hotfix/ship can operate on a generated target workflow.",

@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Global bootstrap runtime for installing WorkflowProgram into projects."""
 
-# Engine-in-cache model: venv is created at the cache/package root, not in the target project
-
 from __future__ import annotations
 
 import argparse
@@ -75,8 +73,8 @@ def _package_root_from_manifest(manifest: dict[str, Any]) -> Path:
     return resolved
 
 
-def _ensure_cache_venv(package_root: Path, base_python: str, use_lock: bool) -> Path:
-    venv_root = package_root / ".workflowprogram" / ".venv"
+def _ensure_project_venv(package_root: Path, target_root: Path, base_python: str, use_lock: bool) -> Path:
+    venv_root = target_root / ".workflowprogram" / "package" / ".venv"
     requirements_name = "requirements.lock.txt" if use_lock else "requirements.txt"
     requirements = package_root / ".workflowprogram" / "runtime" / requirements_name
     if not requirements.is_file():
@@ -142,18 +140,18 @@ def install_project(args: argparse.Namespace, manifest: dict[str, Any]) -> dict[
     warnings: list[str] = []
     if args.create_venv:
         try:
-            runner_python = str(_ensure_cache_venv(package_root, base_python, args.use_lock))
+            runner_python = str(_ensure_project_venv(package_root, target_root, base_python, args.use_lock))
         except Exception as exc:
             return {
                 "action": "bootstrap-install",
                 "verdict": "FAIL",
-                "summary": "Cache venv provisioning failed before package install.",
+                "summary": "Project venv provisioning failed before package install.",
                 "target_root": str(target_root),
                 "package_root": str(package_root),
                 "error": str(exc),
                 "exit_code": 3,
             }
-        warnings.append("Cache venv was pre-provisioned so package-deploy.py can run without system PyYAML.")
+        warnings.append("Project venv was pre-provisioned so package-deploy.py can run without system PyYAML.")
 
     extra_args = []
     if args.create_venv:
@@ -195,9 +193,6 @@ def uninstall_project(args: argparse.Namespace, manifest: dict[str, Any]) -> dic
 
 
 def _python_from_project_manifest(target_root: Path) -> str | None:
-    """Fallback: read python_executable from the target project's install-manifest.
-    In the engine-in-cache model, the manifest's python_executable points to
-    the cache venv python, not a project-local venv."""
     manifest_path = target_root / INSTALL_MANIFEST_PATH
     if not manifest_path.is_file():
         return None

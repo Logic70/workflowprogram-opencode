@@ -53,6 +53,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Raw command arguments passed from the package command",
     )
     parser.add_argument(
+        "--ai-evidence",
+        default="",
+        help="Optional concise evidence summary from host-mediated OpenCode package agents",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Print machine readable output",
@@ -70,6 +75,7 @@ def main() -> int:
         package_root=Path(args.package_root),
         target_root=Path(args.target_root),
         user_arguments=args.user_arguments,
+        ai_evidence=args.ai_evidence,
     )
 
     if args.json:

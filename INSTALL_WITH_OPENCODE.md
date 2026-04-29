@@ -124,7 +124,8 @@ python3 /mnt/d/Code/WorkflowProgram-CN/opencode-v2/package/.workflowprogram/runt
   - `.opencode/commands/wp-ship.md`
   - `.opencode/commands/wp-validate.md`
   - `.opencode/plugins/workflowprogram.ts`
-  - `.workflowprogram/package/install-manifest.json`（仅元数据，非引擎代码）
+  - `.workflowprogram/package/runtime/workflow-entry.py`
+  - `.workflowprogram/package/install-manifest.json`
 
 ### 6. 完成后的用户提示
 

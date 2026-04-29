@@ -52,10 +52,24 @@ def load_agent_roles(package_root: Path) -> list[dict[str, Any]]:
     return roles
 
 
-def _dispatch_prompt(intent: str, role: dict[str, Any]) -> str:
+def _dispatch_timing(intent: str, role: dict[str, Any]) -> str:
+    capabilities = set(role.get("capabilities", []))
+    if "workflow-design" in capabilities and intent in {"develop", "evolve", "hotfix", "iterate"}:
+        return "pre-runtime"
+    return "post-runtime"
+
+
+def _dispatch_prompt(intent: str, role: dict[str, Any], timing: str) -> str:
     agent = role["agent"]
+    if timing == "pre-runtime":
+        return (
+            f"Act as @{agent} before the WorkflowProgram `{intent}` runtime executes. "
+            "Use the user request, TARGET_ROOT context, and existing target workflow spec when present. "
+            "Return a compact design brief with stages, gates, artifacts, risks, and open assumptions. "
+            "Do not edit files and do not choose a different product intent."
+        )
     return (
-        f"Act as @{agent} for the current WorkflowProgram `{intent}` run. "
+        f"Act as @{agent} after the WorkflowProgram `{intent}` runtime produces RUN_ROOT. "
         "Read RUN_ROOT/context.json, RUN_ROOT/state.json, RUN_ROOT/outputs/stages/*.json, "
         "and the target .workflowprogram/design/workflow-spec.yaml when it exists. "
         "Return concrete findings, blockers, and evidence paths; do not redefine the stage plan."
@@ -73,11 +87,12 @@ def plan_team(package_root: Path, intent: str) -> dict[str, Any]:
         {
             "agent": role["agent"],
             "role": role.get("role"),
+            "timing": _dispatch_timing(intent, role),
             "priority": role.get("priority", 100),
             "stage_affinity": role.get("stage_affinity", []),
             "capabilities": role.get("capabilities", []),
             "fan_in": role.get("fan_in", "optional"),
-            "dispatch_prompt": _dispatch_prompt(intent, role),
+            "dispatch_prompt": _dispatch_prompt(intent, role, _dispatch_timing(intent, role)),
             "expected_output": "finding summary with evidence paths and blockers",
         }
         for role in selected
@@ -90,12 +105,12 @@ def plan_team(package_root: Path, intent: str) -> dict[str, Any]:
         "dispatch_policy": {
             "mode": "manual-host-dispatch",
             "runtime_invokes_subagents": False,
-            "host_action": "OpenCode may call the recommended subagents after runtime output is available.",
+            "host_action": "OpenCode commands should call pre-runtime agents before workflow-entry.py and post-runtime agents after RUN_ROOT exists.",
             "evidence_rule": "Do not claim a subagent ran unless a separate agent response or dispatch trace exists.",
         },
         "stage_contract": {
             "runtime_authority": "RUN_ROOT/outputs/stages/*.json defines the current WorkflowProgram stage state.",
-            "agent_authority": "Package agents review or extend evidence for their assigned stage; they do not choose product intent.",
+            "agent_authority": "Package agents produce design/review evidence for their assigned stage; they do not choose product intent or write target files.",
             "target_boundary": "Agents must distinguish WorkflowProgram package files from generated target workflow files.",
         },
         "selected_agents": selected,
@@ -109,6 +124,7 @@ def plan_team(package_root: Path, intent: str) -> dict[str, Any]:
             "Agentteam describes roles and review topology.",
             "OpenCode subagents remain the execution mechanism; this planner does not invoke them directly.",
             "Stage guidance is effective only when the host follows recommended_dispatch or records equivalent evidence.",
+            "Pre-runtime agent evidence can be passed to workflow-entry.py with --ai-evidence for run-state traceability.",
         ],
     }
 
@@ -131,8 +147,13 @@ def team_plan_markdown(plan: dict[str, Any]) -> str:
     dispatch = plan.get("recommended_dispatch", [])
     if not dispatch:
         lines.append("- No package agent dispatch is recommended for this intent.")
-    for item in dispatch:
-        lines.append(f"- `@{item.get('agent')}`: {item.get('dispatch_prompt')}")
+    for timing in ("pre-runtime", "post-runtime"):
+        items = [item for item in dispatch if item.get("timing") == timing]
+        if not items:
+            continue
+        lines.extend(["", f"### {timing}", ""])
+        for item in items:
+            lines.append(f"- `@{item.get('agent')}`: {item.get('dispatch_prompt')}")
     lines.extend(
         [
             "",
@@ -140,6 +161,7 @@ def team_plan_markdown(plan: dict[str, Any]) -> str:
             "",
             "- This file is a dispatch guide, not proof of execution.",
             "- Do not report that an agent ran unless its response or a dispatch trace exists.",
+            "- When pre-runtime agent evidence materially changes the design, pass a concise summary with `--ai-evidence`.",
         ]
     )
     return "\n".join(lines).rstrip() + "\n"

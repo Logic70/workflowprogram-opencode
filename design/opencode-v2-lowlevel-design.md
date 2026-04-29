@@ -76,7 +76,7 @@
 - 依赖 OpenCode 已安装。
 - 依赖 `python3` 可运行 runtime / validator 脚本。
 - runtime 当前依赖 `PyYAML`，并通过 `requirements.txt` 显式声明。
-- 安装器可选在用户级 cache 内创建 `.workflowprogram/.venv`，并把后续命令执行绑定到该解释器；项目本地不再持有 runtime 或 venv。
+- 安装器可选创建 `.workflowprogram/package/.venv`，并把后续命令执行绑定到该解释器。
 - WorkflowProgram 产品命令只允许来自 `.opencode/commands/*.md`。
 - WorkflowProgram package plugin 必须可被 `.opencode/plugins/` 自动加载。
 - `workflow-spec.yaml` 只描述目标工作流语义，不承载产品包契约。
@@ -86,15 +86,6 @@
 - v1 不依赖 `dist/opencode/`，但需要安装脚本把 `package/` 物化成宿主可发现布局。
 - 为改善新项目使用体验，允许安装全局 bootstrap；但 bootstrap 不等同于完整 WorkflowProgram 全局安装。
 - 全局 bootstrap 默认写入 OpenCode global `commands/` 和 `.workflowprogram/bootstrap/`，完整 package 写入用户级 cache。
-
-#### 架构决策：Engine-in-Cache 模型
-
-为解决 AI 代理在目标项目中混淆 WorkflowProgram 引擎文件与目标工作流文件的问题，v2 采用 **engine-in-cache** 架构：
-
-- **核心原则**：Python 引擎 runtime 始终留在用户级 cache（`~/.cache/workflowprogram-opencode/packages/<version>/package/.workflowprogram/runtime/`），不复制到项目本地。
-- **项目本地内容**：目标项目只持有 `.opencode/{commands,agents,plugins}` 资产，不持有 `.workflowprogram/package/*` 目录。
-- **动机**：AI 代理在浏览项目文件树时容易误将 `.workflowprogram/package/runtime/` 中的引擎脚本当作目标工作流相关文件进行编辑或引用。通过将引擎隔离到 cache，项目文件树只呈现目标工作流资产，路径语义更清晰。
-- **影响**：`WP_PACKAGE_ROOT` 概念调整为指向 cache 位置而非项目根；所有 runtime 路径引用需指向 cache；venv 创建于 cache 内而非项目本地。
 
 #### 硬件限制
 
@@ -122,7 +113,11 @@
 graph LR
     U["用户 /wp-*"] --> C["Package Command"]
     C --> P["Package Plugin Bridge"]
+    C --> ATP["agent-team-planner.py"]
+    ATP --> A["OpenCode package agents"]
+    A --> AE["AI evidence summary"]
     C --> E["workflow-entry.py"]
+    AE -. "--ai-evidence" .-> E
     E --> S["workflow-spec build"]
     S --> B["target bundle generator"]
     B --> M["managed apply"]
@@ -133,18 +128,19 @@ graph LR
 
 ### 特性功能设计
 
-建议拆成 8 个特性模块：
+建议拆成 9 个特性模块：
 
 | 模块 | 作用 | 所属契约层 |
 |---|---|---|
 | F1 Package Load | 加载 WorkflowProgram 产品包 | 产品包契约 |
 | F2 Package Entry | `/wp-*` 命令分发 | 产品包契约 |
 | F3 Plugin Bridge | 提供 hook/custom tool | 产品包契约 |
-| F4 Workflow Semantics Build | 生成目标工作流语义 spec | 工作流语义契约 |
-| F5 Target Bundle Delivery | 生成并写入目标 bundle | 目标交付契约 |
-| F6 Evidence & Validation | 运行证据与分层校验 | 运行证据契约 |
-| F7 Global Bootstrap | 全局轻量部署入口 | 安装部署契约 |
-| F8 User Package Cache | 版本化 package 安装源 | 安装部署契约 |
+| F4 AI Collaboration | OpenCode package agents 产出设计/评审证据 | AI 协作契约 |
+| F5 Workflow Semantics Build | 生成目标工作流语义 spec | 工作流语义契约 |
+| F6 Target Bundle Delivery | 生成并写入目标 bundle | 目标交付契约 |
+| F7 Evidence & Validation | 运行证据与分层校验 | 运行证据契约 |
+| F8 Global Bootstrap | 全局轻量部署入口 | 安装部署契约 |
+| F9 User Package Cache | 版本化 package 安装源 | 安装部署契约 |
 
 ### UC-01 产品包加载实现
 #### 设计思路
@@ -492,6 +488,8 @@ graph TB
 - `agentteam` 由 runtime 生成 `team-plan.json` 与 `team-plan.md`，描述阶段、角色、并行度、输入、输出、调度提示和汇聚策略。
 - subagent 是执行手段，但 v1 runtime 不直接调用 OpenCode subagent；OpenCode host 或用户需要按 `recommended_dispatch` 显式调用 package agent。
 - `team-plan` 是调度指南，不是执行证据；只有独立 agent 响应、dispatch trace 或 fan-in report 才能证明 subagent 已运行。
+- package command 先运行 `agent-team-planner.py`，按 `pre-runtime` 调度设计类 agent，再运行 `workflow-entry.py`；runtime 结束后按 `post-runtime` 调度验证/审计类 agent。
+- pre-runtime agent 结论以简短摘要通过 `workflow-entry.py --ai-evidence` 进入 `context.json` 和 `state.json`，用于回放与审计。
 - `workflow-designer` 负责设计，`workflow-validator` 负责契约校验，`workflow-verifier` 负责证据闭环，reviewer 负责专项审查，`test-scenario-generator` 负责场景覆盖。
 
 #### 推荐 agent frontmatter

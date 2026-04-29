@@ -147,7 +147,9 @@ python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py status --
 
 package agents 是 WorkflowProgram 随包安装到 `.opencode/agents/*.md` 的 OpenCode 角色定义。它们用于设计、校验、验证和专项评审，可以被 WorkflowProgram 的编排逻辑引用，也可以由用户按 OpenCode 的方式显式 `@` 调用。它们不是 agentteam 本身；agentteam 是运行时生成的团队计划和阶段职责，package agent 是其中可被调用的单个执行角色。
 
-运行时会在 `RUN_ROOT/outputs/team-plan.json` 和 `RUN_ROOT/outputs/team-plan.md` 生成 agentteam 调度建议。这个文件只是调度指南，不代表 subagent 已经执行；只有 OpenCode 实际调用 `@workflow-designer` 等 agent 并留下响应或调度记录后，才能认为该 agent 参与了运行。
+`/wp-develop`、`/wp-evolve`、`/wp-hotfix`、`/wp-iterate` 会先运行 agentteam planner，并要求 OpenCode 在 Python runtime 前调度 `pre-runtime` package agents，例如 `@workflow-designer`。这些 agent 产出的是 AI 设计/评审证据；Python runtime 负责把结论固化为 spec、bundle、managed apply 和验证证据。
+
+运行时会在 `RUN_ROOT/outputs/team-plan.json` 和 `RUN_ROOT/outputs/team-plan.md` 生成 agentteam 调度建议。这个文件只是调度指南，不代表 subagent 已经执行；只有 OpenCode 实际调用 `@workflow-designer` 等 agent 并留下响应或调度记录后，才能认为该 agent 参与了运行。pre-runtime agent 摘要可以通过 `workflow-entry.py --ai-evidence` 进入 `context.json` 和 `state.json`。
 
 典型流程：
 
@@ -202,14 +204,15 @@ package agents 是 WorkflowProgram 随包安装到 `.opencode/agents/*.md` 的 O
 └── .workflowprogram/
     └── package/
         ├── install-manifest.json
-        └── .venv/                  # optional
+        ├── .venv/                  # optional
+        └── runtime/
 ```
 
 注意：
 
-- 引擎（Python runtime）从全局缓存运行，不再复制到目标项目
-- `.workflowprogram/package/install-manifest.json` 仅包含安装元数据，不包含引擎代码
+- package runtime 位于 `.workflowprogram/package/runtime/`
 - 生成的目标工作流 runtime 位于 `.workflowprogram/runtime/`
+- 这两个路径是刻意隔离的，避免产品包和生成物互相覆盖
 - 生成的目标工作流存在性只以 `.workflowprogram/design/workflow-spec.yaml` 为准；`.workflowprogram/package/*`、`.workflowprogram/runtime/*` 或 `.workflowprogram/runs/*` 单独存在时不能作为 evolve/iterate/hotfix/ship 的依据
 
 ## 当前状态

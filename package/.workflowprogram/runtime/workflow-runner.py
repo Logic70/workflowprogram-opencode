@@ -71,11 +71,18 @@ class RunContext:
     run_root: str
     created_at: str
     user_arguments: str
+    ai_evidence: str
     package: PackageContext
     target: TargetContext
 
 
-def _build_contexts(package_root: Path, target_root: Path, intent: str, user_arguments: str) -> RunContext:
+def _build_contexts(
+    package_root: Path,
+    target_root: Path,
+    intent: str,
+    user_arguments: str,
+    ai_evidence: str = "",
+) -> RunContext:
     layout = detect_package_layout(package_root)
     package_root = layout.package_root
     target_root = target_root.resolve()
@@ -87,6 +94,7 @@ def _build_contexts(package_root: Path, target_root: Path, intent: str, user_arg
         run_root=str(run_root),
         created_at=iso_now(),
         user_arguments=user_arguments,
+        ai_evidence=ai_evidence,
         package=PackageContext(
             package_root=str(package_root),
             layout_kind=layout.layout_kind,
@@ -197,6 +205,10 @@ def _bootstrap_run(run: RunContext) -> None:
             "verdict": "WARN",
             "failure_kind": None,
             "status": "running",
+            "ai_collaboration": {
+                "evidence_supplied": bool(run.ai_evidence.strip()),
+                "evidence_summary": run.ai_evidence.strip()[:1000] if run.ai_evidence.strip() else None,
+            },
         },
     )
     _append_event(run, "RunStarted", "S0", "running", "WorkflowProgram run started")
@@ -913,8 +925,9 @@ def _run_mutation_intent(
     user_arguments: str,
     *,
     require_existing_spec: bool,
+    ai_evidence: str = "",
 ) -> dict[str, Any]:
-    run = _build_contexts(package_root, target_root, intent, user_arguments)
+    run = _build_contexts(package_root, target_root, intent, user_arguments, ai_evidence=ai_evidence)
     _bootstrap_run(run)
 
     run_root = Path(run.run_root)
@@ -934,7 +947,14 @@ def _run_mutation_intent(
         "iterate": "Iterate request normalized using existing target workflow context.",
         "evolve": "Evolve request normalized using existing target workflow evidence.",
     }
-    request_outputs: dict[str, Any] = {"summary": request.summary, "team_plan": team_plan_outputs}
+    request_outputs: dict[str, Any] = {
+        "summary": request.summary,
+        "team_plan": team_plan_outputs,
+        "ai_collaboration": {
+            "evidence_supplied": bool(run.ai_evidence.strip()),
+            "evidence_summary": run.ai_evidence.strip()[:1000] if run.ai_evidence.strip() else None,
+        },
+    }
     if inherited_identity:
         request_outputs["inherited_identity"] = inherited_identity
     if latest_run:
@@ -1171,48 +1191,77 @@ def _run_mutation_intent(
     }
 
 
-def run_develop(package_root: Path, target_root: Path, user_arguments: str) -> dict[str, Any]:
+def run_develop(
+    package_root: Path,
+    target_root: Path,
+    user_arguments: str,
+    ai_evidence: str = "",
+) -> dict[str, Any]:
     return _run_mutation_intent(
         "develop",
         package_root,
         target_root,
         user_arguments,
         require_existing_spec=False,
+        ai_evidence=ai_evidence,
     )
 
 
-def run_hotfix(package_root: Path, target_root: Path, user_arguments: str) -> dict[str, Any]:
+def run_hotfix(
+    package_root: Path,
+    target_root: Path,
+    user_arguments: str,
+    ai_evidence: str = "",
+) -> dict[str, Any]:
     return _run_mutation_intent(
         "hotfix",
         package_root,
         target_root,
         user_arguments,
         require_existing_spec=True,
+        ai_evidence=ai_evidence,
     )
 
 
-def run_iterate(package_root: Path, target_root: Path, user_arguments: str) -> dict[str, Any]:
+def run_iterate(
+    package_root: Path,
+    target_root: Path,
+    user_arguments: str,
+    ai_evidence: str = "",
+) -> dict[str, Any]:
     return _run_mutation_intent(
         "iterate",
         package_root,
         target_root,
         user_arguments,
         require_existing_spec=True,
+        ai_evidence=ai_evidence,
     )
 
 
-def run_evolve(package_root: Path, target_root: Path, user_arguments: str) -> dict[str, Any]:
+def run_evolve(
+    package_root: Path,
+    target_root: Path,
+    user_arguments: str,
+    ai_evidence: str = "",
+) -> dict[str, Any]:
     return _run_mutation_intent(
         "evolve",
         package_root,
         target_root,
         user_arguments,
         require_existing_spec=True,
+        ai_evidence=ai_evidence,
     )
 
 
-def run_validate(package_root: Path, target_root: Path, user_arguments: str) -> dict[str, Any]:
-    run = _build_contexts(package_root, target_root, "validate", user_arguments)
+def run_validate(
+    package_root: Path,
+    target_root: Path,
+    user_arguments: str,
+    ai_evidence: str = "",
+) -> dict[str, Any]:
+    run = _build_contexts(package_root, target_root, "validate", user_arguments, ai_evidence=ai_evidence)
     _bootstrap_run(run)
     diagnostic_outputs = _write_diagnostic_artifacts(run, Path(run.package.package_root), Path(run.target.target_root))
     team_plan_outputs = _write_team_plan(run)
@@ -1274,8 +1323,13 @@ def run_validate(package_root: Path, target_root: Path, user_arguments: str) -> 
     }
 
 
-def run_audit(package_root: Path, target_root: Path, user_arguments: str) -> dict[str, Any]:
-    run = _build_contexts(package_root, target_root, "audit", user_arguments)
+def run_audit(
+    package_root: Path,
+    target_root: Path,
+    user_arguments: str,
+    ai_evidence: str = "",
+) -> dict[str, Any]:
+    run = _build_contexts(package_root, target_root, "audit", user_arguments, ai_evidence=ai_evidence)
     _bootstrap_run(run)
 
     target_root_path = Path(run.target.target_root)
@@ -1397,8 +1451,13 @@ def run_audit(package_root: Path, target_root: Path, user_arguments: str) -> dic
     }
 
 
-def run_preflight(package_root: Path, target_root: Path, user_arguments: str) -> dict[str, Any]:
-    run = _build_contexts(package_root, target_root, "preflight", user_arguments)
+def run_preflight(
+    package_root: Path,
+    target_root: Path,
+    user_arguments: str,
+    ai_evidence: str = "",
+) -> dict[str, Any]:
+    run = _build_contexts(package_root, target_root, "preflight", user_arguments, ai_evidence=ai_evidence)
     _bootstrap_run(run)
 
     target_root_path = Path(run.target.target_root)
@@ -1500,8 +1559,13 @@ def run_preflight(package_root: Path, target_root: Path, user_arguments: str) ->
     }
 
 
-def run_ship(package_root: Path, target_root: Path, user_arguments: str) -> dict[str, Any]:
-    run = _build_contexts(package_root, target_root, "ship", user_arguments)
+def run_ship(
+    package_root: Path,
+    target_root: Path,
+    user_arguments: str,
+    ai_evidence: str = "",
+) -> dict[str, Any]:
+    run = _build_contexts(package_root, target_root, "ship", user_arguments, ai_evidence=ai_evidence)
     _bootstrap_run(run)
 
     target_root_path = Path(run.target.target_root)
@@ -1608,8 +1672,13 @@ def run_ship(package_root: Path, target_root: Path, user_arguments: str) -> dict
     }
 
 
-def run_orchestrate(package_root: Path, target_root: Path, user_arguments: str) -> dict[str, Any]:
-    run = _build_contexts(package_root, target_root, "orchestrate", user_arguments)
+def run_orchestrate(
+    package_root: Path,
+    target_root: Path,
+    user_arguments: str,
+    ai_evidence: str = "",
+) -> dict[str, Any]:
+    run = _build_contexts(package_root, target_root, "orchestrate", user_arguments, ai_evidence=ai_evidence)
     _bootstrap_run(run)
     run_root = Path(run.run_root)
     target_root_path = Path(run.target.target_root)
@@ -1704,7 +1773,13 @@ def run_orchestrate(package_root: Path, target_root: Path, user_arguments: str) 
     }
 
 
-def run_intent(intent: str, package_root: Path, target_root: Path, user_arguments: str) -> dict[str, Any]:
+def run_intent(
+    intent: str,
+    package_root: Path,
+    target_root: Path,
+    user_arguments: str,
+    ai_evidence: str = "",
+) -> dict[str, Any]:
     handlers = {
         "develop": run_develop,
         "validate": run_validate,
@@ -1718,4 +1793,4 @@ def run_intent(intent: str, package_root: Path, target_root: Path, user_argument
     }
     if intent not in handlers:
         raise ValueError(f"Unsupported intent: {intent}")
-    return handlers[intent](package_root, target_root, user_arguments)
+    return handlers[intent](package_root, target_root, user_arguments, ai_evidence=ai_evidence)

@@ -113,6 +113,7 @@
 | INT-01 | intent contract 完整 | commands、runtime intent、handler、spec flow | 不允许存在 command/runtime/spec flow 悬空项 | intent_contract |
 | AGT-01 | package agent role schema 合法 | `.opencode/agents/*.md` | 必需 role 元数据存在且取值合法 | agent_contract |
 | AGT-02 | team plan 可解析 | `RUN_ROOT/outputs/team-plan.json` | 阶段、角色、输入、输出、fan-in 策略完整 | orchestration |
+| AGT-03 | AI 协作证据可追踪 | `context.json`、`state.json`、command transcript | 若命令调度了 package agent，必须记录独立 agent 输出或 `--ai-evidence` 摘要；未调度时必须报告 skip | orchestration |
 | HOST-01 | host source inventory 存在 | doctor diagnostics | 必须列出 project/global/known external asset sources | host_isolation |
 | HOST-02 | namespace shadowing 检测 | commands/agents/skills/plugins | 同名或覆盖风险必须报告来源路径 | namespace_shadowing |
 | REL-01 | release manifest 合法 | `dist/opencode/manifest.json` | 文件清单、checksum、excluded patterns 必须完整 | release_contract |

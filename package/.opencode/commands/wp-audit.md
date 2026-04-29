@@ -10,6 +10,7 @@ Rules:
 - Pass `$ARGUMENTS` to the runtime as raw audit context.
 - Audit is read-only and must not write target assets.
 - Only `.workflowprogram/design/workflow-spec.yaml` means a generated target workflow exists; package files and run history are audit context, not target existence proof.
+- Use package agents as the AI collaboration layer after deterministic audit evidence exists.
 
 Run this first:
 
@@ -20,5 +21,6 @@ Run this first:
 Then:
 - Report the created `RUN_ROOT`.
 - Summarize package, target bundle, run-state, host visibility, and lessons findings.
-- Report `team_plan.team_plan_guide` when present as the stage/agent dispatch guide; do not claim package agents ran unless separate agent output exists.
+- Dispatch `post-runtime` agents from `team_plan.team_plan_guide` when present.
+- Do not claim package agents ran unless separate agent output exists.
 - If the runtime reports missing target assets, surface that as an audit finding rather than guessing success.
