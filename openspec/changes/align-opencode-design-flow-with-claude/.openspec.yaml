@@ -1,0 +1,7 @@
+id: align-opencode-design-flow-with-claude
+status: proposed
+title: Align OpenCode design flow with ClaudeCode WorkflowProgram semantics
+owner: workflowprogram-opencode
+supersedes:
+  - add-ai-collaboration-layer
+

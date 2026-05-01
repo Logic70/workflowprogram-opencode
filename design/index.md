@@ -8,6 +8,8 @@
 
 - [opencode-v2-highlevel-design.md](opencode-v2-highlevel-design.md)
 - [opencode-v2-lowlevel-design.md](opencode-v2-lowlevel-design.md)
+- [opencode-v2-graph-workflow-design.md](opencode-v2-graph-workflow-design.md)
+- [opencode-v2-graph-workflow-plan.md](opencode-v2-graph-workflow-plan.md)
 - [opencode-v2-validation-matrix.md](opencode-v2-validation-matrix.md)
 - [opencode-v2-implementation-plan.md](opencode-v2-implementation-plan.md)
 - [opencode-v2-capability-parity-matrix.md](opencode-v2-capability-parity-matrix.md)

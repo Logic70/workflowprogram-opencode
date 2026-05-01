@@ -69,7 +69,7 @@
 | AR-19 | 平台边界明确 | WSL/Windows 路径、离线依赖、OpenCode 版本兼容和 plugin reload 规则必须显式记录 |
 | AR-20 | 能力差距可追踪 | ClaudeCode 到 OpenCode 的能力映射必须维护为设计资产，明确已实现、不适用、待规划和替代实现 |
 | AR-21 | 全局部署器轻量化 | 为改善新项目体验，可提供全局 bootstrap，但完整 WorkflowProgram 仍必须物化为 project-local 安装 |
-| AR-22 | AI 协作层显式化 | `/wp-*` 命令必须把 OpenCode package agents 作为 AI 协作层接入，Python runtime 只负责确定性固化、校验和写入 |
+| AR-22 | AI 协作层显式化 | `/wp-*` 命令必须由 OpenCode host/model 完成设计与回读确认，Python runtime 只消费已接受的 `workflow-spec.yaml` 并负责确定性校验、生成和写入 |
 
 ### 架构级原则与约束
 
@@ -89,7 +89,8 @@
 - 用户级 package cache 只能作为安装源，不作为运行时真源；项目一旦安装完成，运行时应以项目本地 manifest 和 `.workflowprogram/package/runtime/` 为准。
 - status 与 orchestrate 输出必须同时暴露 `project_package_installed` 与 `target_workflow_exists`，禁止用泛化的 `.workflowprogram` 目录推断状态。
 - package runtime 的 Python 依赖必须显式声明；v1 通过 `requirements.txt` 声明，并允许安装器创建 `.workflowprogram/package/.venv` 作为专用解释器。
-- package command 必须先通过 `agent-team-planner.py` 或 `team-plan` 明确 agent 调度建议；pre-runtime agent 证据可通过 `--ai-evidence` 进入 runtime 证据链。
+- package command 可以通过 `agent-team-planner.py` 或 `team-plan` 获取可选 agent 调度建议；planner 输出不是 mutation 成功条件。
+- `/wp-develop` 默认必须先完成交互式澄清、设计回读确认并形成 `workflow-spec.md` / `workflow-spec.yaml`；未确认请求或缺少 accepted spec 时只能产出 blocking questions/WARN，不得直接生成 target bundle。`--ai-evidence` 仅是 legacy 诊断字段，不能替代 accepted spec 或用户确认。
 - Python runtime 不直接调用 OpenCode subagent；OpenCode host 或用户显式调用 package agents，runtime 记录和校验可回放证据。
 - 任何运行时依赖的 validator 脚本都必须随 `WP_PACKAGE_ROOT` 一起交付，不得依赖仓库根目录中的额外源码。
 - 所有目标写入必须先生成 candidate，再执行 managed apply。
@@ -564,3 +565,19 @@ graph TB
 | release build 是否替代 `package/` 部署源 | 不替代 v1 安装路径；作为发布和 CI 的干净产物来源 |
     A0 --> A3
     A0 --> B1
+
+## Graph Workflow Target Model
+
+The current target direction is graph-shaped workflow design, not a fixed S1-S6 slot pipeline.
+
+- AI defines request-specific stage nodes and transitions inside the accepted workflow spec.
+- The framework keeps the spec shape, validation, generation, and managed apply mechanics.
+- Reusable behaviors such as clarification, validation, self-iteration, merge, and handoff may be expressed as optional capability templates or subgraphs.
+- Shared context semantics are part of the workflow design itself.
+- Read/write permissions are intentionally deferred to a later task and are not part of this change.
+
+This means the following should be treated as transitional implementation details rather than target design facts:
+
+- fixed stage-slot naming
+- fixed intent-to-stage tables
+- any hardcoded assumption that every workflow must contain S1-S6
