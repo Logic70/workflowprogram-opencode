@@ -12,6 +12,7 @@ Rules:
 - Existing generated target workflow means `.workflowprogram/design/workflow-spec.yaml`, not `.workflowprogram/package/*`, `.workflowprogram/runtime/*`, or `.workflowprogram/runs/*` alone.
 - Do not write target assets directly from the command body.
 - Use the host model/package agents to produce the accepted updated `workflow-spec.yaml`; Python validates and applies it.
+- Treat latest prior lessons as design context when present, but do not let lessons automatically rewrite `workflow-spec.yaml`.
 
 Optionally run the agentteam planner first:
 

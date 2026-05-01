@@ -28,6 +28,9 @@ from runtime_common import (  # noqa: E402
 from error_codes import code_for, remediation_for  # noqa: E402
 
 
+ALLOWED_TARGET_PLUGIN_HOOK_EVENTS = {"event", "tool.execute.before", "tool.execute.after"}
+
+
 def _check(check_id: str, passed: bool, detail: str, category: str) -> dict[str, Any]:
     return {
         "id": check_id,
@@ -183,6 +186,31 @@ def validate_target_bundle(target_root: Path) -> dict[str, Any]:
             "TGT-10",
             not undeclared_opencode_assets and not missing_declared_opencode_assets,
             f"undeclared={undeclared_opencode_assets} missing_declared={missing_declared_opencode_assets}",
+            "bundle_policy",
+        )
+    )
+    hook_consistency_ok = True
+    hook_details: list[str] = []
+    for plugin in plugins:
+        relative_file = str(plugin.get("file", "")).replace("\\", "/")
+        hook_events = plugin.get("hook_events", [])
+        plugin_path = resolved / relative_file
+        content = plugin_path.read_text(encoding="utf-8") if plugin_path.is_file() else ""
+        declared_events = {str(event).strip() for event in hook_events} if isinstance(hook_events, list) else set()
+        current_ok = bool(declared_events) and declared_events.issubset(ALLOWED_TARGET_PLUGIN_HOOK_EVENTS)
+        for event in declared_events:
+            if event not in content:
+                current_ok = False
+        for event in ALLOWED_TARGET_PLUGIN_HOOK_EVENTS - declared_events:
+            if event in content:
+                current_ok = False
+        hook_consistency_ok = hook_consistency_ok and current_ok
+        hook_details.append(f"{relative_file}: declared={sorted(declared_events)}")
+    checks.append(
+        _check(
+            "TGT-11",
+            hook_consistency_ok,
+            "; ".join(hook_details) if hook_details else "plugins=[]",
             "bundle_policy",
         )
     )

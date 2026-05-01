@@ -14,7 +14,7 @@ Rules:
 - Default mode is interactive. If the user has not already answered clarification questions and confirmed the design readback, ask the questions first and stop; do not run the runtime yet.
 
 Interactive clarification gate:
-- For broad requests like "create a reverse engineering workflow", ask 3-5 concrete questions about target object, expected deliverables, allowed tools/boundaries, graph nodes/transitions or branch points, and target command/plugin needs.
+- For broad requests like "create a reverse engineering workflow", use a brainstorm -> constrain -> converge -> readback flow. Ask about plausible workflow shapes, target object, expected deliverables, allowed tools/boundaries, validation signals, retry/stop conditions, graph nodes/transitions or branch points, and target command/plugin hook needs.
 - After the user answers, summarize the proposed workflow graph and ask for explicit confirmation.
 - Only after confirmation, write the accepted design as `workflow-spec.md` and `workflow-spec.yaml`, then continue below and append `--confirmed` to the runtime command.
 - If `$ARGUMENTS` already contains `--confirmed` or the user explicitly confirms in this turn, continue below.

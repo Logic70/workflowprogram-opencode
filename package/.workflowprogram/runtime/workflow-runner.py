@@ -288,6 +288,8 @@ def _latest_prior_run(target_root: Path, current_run_root: Path) -> dict[str, An
         state = read_json(state_path)
         validation_path = candidate / "validation-summary.json"
         validation = read_json(validation_path) if validation_path.is_file() else {}
+        lessons_path = candidate / "outputs" / "stages" / "s6-lessons-summary.json"
+        lessons = read_json(lessons_path) if lessons_path.is_file() else {}
         return {
             "run_id": candidate.name,
             "run_root": str(candidate),
@@ -295,6 +297,8 @@ def _latest_prior_run(target_root: Path, current_run_root: Path) -> dict[str, An
             "status": state.get("status"),
             "message": state.get("message"),
             "validation_verdict": validation.get("verdict"),
+            "lessons_path": str(lessons_path) if lessons else None,
+            "lessons_summary": lessons if lessons else None,
         }
     return None
 
@@ -354,11 +358,27 @@ def _write_clarification_package(
         "normalized_spec_name": request.spec_name,
         "complexity": request.complexity,
         "latest_prior_run": latest_run,
+        "clarification_method": {
+            "id": "brainstorm-constrain-converge-readback",
+            "groups": [
+                "divergent_options",
+                "hard_constraints",
+                "convergence_criteria",
+                "readback_confirmation",
+            ],
+        },
         "generated_at": iso_now(),
     }
     open_questions = {
         "blocking": blocking_questions,
         "non_blocking": non_blocking_questions,
+        "method": "brainstorm-constrain-converge-readback",
+        "question_groups": {
+            "divergent_options": "Explore viable workflow shapes and optional capabilities before selecting one.",
+            "hard_constraints": "Identify tools, boundaries, side effects, privacy, and allowed writes.",
+            "convergence_criteria": "Choose validation signals, stopping conditions, and tradeoffs.",
+            "readback_confirmation": "Confirm the selected graph, deliverables, target command/plugin, and hook needs.",
+        },
         "summary": (
             "Interactive clarification is required before generating the target workflow."
             if blocking_questions
@@ -480,11 +500,12 @@ def _argument_confirms(user_arguments: str) -> bool:
 def _interactive_clarification_questions(request: DevelopRequest) -> list[str]:
     summary = request.summary.strip() or "the requested workflow"
     return [
-        f"For `{summary}`, what exact target object should the workflow operate on?",
-        "What final deliverables should the workflow produce?",
-        "Which tools and boundaries are allowed for analysis, execution, decompilation, tracing, or debugging?",
-        "Which graph nodes, branch/fan-in points, and human confirmation points must be preserved?",
-        "Should the generated target workflow expose an OpenCode command or plugin entry point? If yes, what names?",
+        f"For `{summary}`, what are 2-3 plausible workflow shapes to consider, and which one should be preferred?",
+        "What exact target object and final deliverables should the workflow operate on and produce?",
+        "What hard constraints apply: allowed tools, write boundaries, external side effects, privacy, or execution limits?",
+        "What validation signals, retry limits, stop conditions, and human handoff conditions should determine success?",
+        "Which graph nodes, branch/fan-in points, optional self-iteration, and confirmation points should be present?",
+        "Should the target workflow expose an OpenCode command or plugin hook? If yes, what names and hook events?",
     ]
 
 def _load_runtime_module(script_name: str, module_name: str):
@@ -578,6 +599,8 @@ def _build_workflow_spec(
                 "file": plugin_file,
                 "plugin_id": request.target_plugin_id,
                 "description": f"Bridge plugin for generated target workflow {request.spec_name}",
+                "hook_intents": ["runtime_visibility"],
+                "hook_events": ["tool.execute.after"],
             }
         )
         required_outputs.append(plugin_file)
@@ -627,6 +650,13 @@ def _build_workflow_spec(
                 "purpose": "Iterate on failed checks until exit conditions are met.",
                 "when_to_use": "Use for larger workflow designs where validation feedback is expected.",
                 "expanded_nodes": ["iterate-on-failures", "generate-target-bundle"],
+                "max_attempts": 2,
+                "stop_conditions": [
+                    "validation reaches terminal PASS",
+                    "managed apply reports conflict",
+                    "retry budget is exhausted",
+                    "human handoff is required",
+                ],
             }
         )
 
@@ -1221,27 +1251,81 @@ python3 ".workflowprogram/runtime/workflow-entry.py" --target-root "$PWD"
 """
 
 
-def _target_plugin_source(plugin_id: str, spec_name: str) -> str:
-    return f"""const TARGET_PLUGIN_ID = "{plugin_id}"
-
-export const TargetWorkflowPlugin = async (context) => {{
-  return {{
-    "tool.execute.after": async (input, output) => {{
-      if (input?.tool !== "bash") {{
+def _target_plugin_source(
+    plugin_id: str,
+    spec_name: str,
+    hook_intents: list[str],
+    hook_events: list[str],
+) -> str:
+    hook_list = ", ".join(f'"{event}"' for event in hook_events)
+    intent_list = ", ".join(f'"{intent}"' for intent in hook_intents)
+    handlers: list[str] = []
+    if "event" in hook_events:
+        handlers.append(
+            '''    event: async ({ event }) => {
+      await context?.client?.app?.log?.({
+        body: {
+          service: TARGET_PLUGIN_ID,
+          level: "info",
+          message: "Generated target workflow event observed",
+          extra: {
+            workflow: TARGET_WORKFLOW_NAME,
+            eventType: event?.type ?? null,
+            hookIntents: TARGET_HOOK_INTENTS,
+          },
+        },
+      })
+    },'''
+        )
+    if "tool.execute.before" in hook_events:
+        handlers.append(
+            '''    "tool.execute.before": async (input, output) => {
+      if (input?.tool !== "bash") {
         return
-      }}
-      await context?.client?.app?.log?.({{
-        body: {{
+      }
+      await context?.client?.app?.log?.({
+        body: {
+          service: TARGET_PLUGIN_ID,
+          level: "info",
+          message: "Generated target workflow command is about to execute",
+          extra: {
+            workflow: TARGET_WORKFLOW_NAME,
+            command: output?.args?.command ?? null,
+            hookIntents: TARGET_HOOK_INTENTS,
+          },
+        },
+      })
+    },'''
+        )
+    if "tool.execute.after" in hook_events:
+        handlers.append(
+            '''    "tool.execute.after": async (input, output) => {
+      if (input?.tool !== "bash") {
+        return
+      }
+      await context?.client?.app?.log?.({
+        body: {
           service: TARGET_PLUGIN_ID,
           level: output?.exitCode === 0 ? "info" : "warn",
           message: "Generated target workflow command executed",
-          extra: {{
-            workflow: "{spec_name}",
+          extra: {
+            workflow: TARGET_WORKFLOW_NAME,
             exitCode: output?.exitCode ?? null,
-          }},
-        }},
-      }})
-    }},
+            hookIntents: TARGET_HOOK_INTENTS,
+          },
+        },
+      })
+    },'''
+        )
+    body = "\n".join(handlers) or "    // No hook handlers declared.\n"
+    return f"""const TARGET_PLUGIN_ID = "{plugin_id}"
+const TARGET_WORKFLOW_NAME = "{spec_name}"
+const TARGET_HOOK_EVENTS = [{hook_list}]
+const TARGET_HOOK_INTENTS = [{intent_list}]
+
+export const TargetWorkflowPlugin = async (context) => {{
+  return {{
+{body}
   }}
 }}
 """
@@ -1283,7 +1367,17 @@ def _build_candidate_bundle(run: RunContext, spec: dict[str, Any], view_text: st
 
     for plugin in spec["registry"]["plugins"]:
         plugin_path = candidate_root / plugin["file"]
-        write_text(plugin_path, _target_plugin_source(plugin["plugin_id"], spec_name))
+        hook_intents = plugin.get("hook_intents", [])
+        hook_events = plugin.get("hook_events", [])
+        write_text(
+            plugin_path,
+            _target_plugin_source(
+                plugin["plugin_id"],
+                spec_name,
+                [str(item) for item in hook_intents] if isinstance(hook_intents, list) else [],
+                [str(item) for item in hook_events] if isinstance(hook_events, list) else [],
+            ),
+        )
 
     return candidate_root
 
@@ -1334,6 +1428,86 @@ def _write_validation_artifacts(run_root: Path, summary: dict[str, Any]) -> None
             ]
         )
     write_text(run_root / "validation-summary.md", "\n".join(lines).rstrip() + "\n")
+
+
+def _validation_findings(validation_summary: dict[str, Any]) -> list[str]:
+    findings: list[str] = []
+    layers = validation_summary.get("layers", {})
+    if not isinstance(layers, dict):
+        return findings
+    for layer_name, layer in layers.items():
+        if not isinstance(layer, dict):
+            continue
+        layer_verdict = str(layer.get("verdict", "")).strip()
+        if layer_verdict in {"FAIL", "WARN"}:
+            findings.append(f"{layer_name}: verdict {layer_verdict}")
+        for check in layer.get("checks", []):
+            if not isinstance(check, dict):
+                continue
+            check_failed = check.get("passed") is False or str(check.get("status", "")).strip() in {"FAIL", "WARN"}
+            if check_failed:
+                check_id = str(check.get("id", "unknown"))
+                detail = str(check.get("detail", check.get("summary", ""))).strip()
+                findings.append(f"{layer_name}/{check_id}: {detail}" if detail else f"{layer_name}/{check_id}")
+    return findings
+
+
+def _build_lessons_payload(
+    run: RunContext,
+    intent: str,
+    validation_summary: dict[str, Any],
+    judge_summary: dict[str, Any],
+    apply_result: dict[str, Any] | None = None,
+    design_source_mode: str | None = None,
+) -> dict[str, Any]:
+    validation_verdict = str(validation_summary.get("verdict", "WARN"))
+    judge_verdict = str(judge_summary.get("verdict", "WARN"))
+    managed_status = str((apply_result or {}).get("status", "not-applicable"))
+    findings = _validation_findings(validation_summary)
+
+    observations = [
+        f"{intent} completed with validation={validation_verdict}, judge={judge_verdict}, managed_apply={managed_status}.",
+    ]
+    if design_source_mode:
+        observations.append(f"design_source_mode={design_source_mode}.")
+    if findings:
+        observations.append(f"{len(findings)} validation finding(s) should be reviewed before future evolution.")
+
+    failure_patterns = findings
+    reusable_constraints: list[str] = []
+    residual_risks: list[str] = []
+    evolve_recommendations: list[str] = []
+
+    if (apply_result or {}).get("conflicts"):
+        reusable_constraints.append("Managed apply conflicts must be resolved before reusing this workflow update pattern.")
+        residual_risks.append("Candidate bundle was not fully applied because managed apply detected conflicts.")
+        evolve_recommendations.append("Revise write boundaries or generated file ownership before the next mutation.")
+    if validation_verdict != "PASS" or judge_verdict != "PASS":
+        residual_risks.append("Validation did not reach PASS; generated workflow should not be treated as fully proven.")
+        evolve_recommendations.append("Use /wp-evolve with the failed validation checks as design input.")
+    if design_source_mode == "template_fallback":
+        residual_risks.append("Template fallback was used; this run is not equivalent to an AI-designed accepted spec path.")
+        evolve_recommendations.append("Replace fallback output with an AI-designed workflow-spec.md and accepted workflow-spec.yaml.")
+    if not evolve_recommendations:
+        evolve_recommendations.append("No immediate evolve action is required unless product requirements change.")
+
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "intent": intent,
+        "run_root": run.run_root,
+        "generated_at": iso_now(),
+        "observations": observations,
+        "failure_patterns": failure_patterns,
+        "reusable_constraints": reusable_constraints,
+        "residual_risks": residual_risks,
+        "evolve_recommendations": evolve_recommendations,
+        "source_verdicts": {
+            "validation": validation_verdict,
+            "judge": judge_verdict,
+            "managed_apply": managed_status,
+            "design_source_mode": design_source_mode,
+        },
+    }
 
 
 def _missing_target_result(run: RunContext, intent: str, message: str, existing_assets: dict[str, Any]) -> dict[str, Any]:
@@ -1442,6 +1616,12 @@ def _run_mutation_intent(
         request_outputs["inherited_identity"] = inherited_identity
     if latest_run:
         request_outputs["latest_prior_run"] = latest_run
+        if intent == "evolve" and latest_run.get("lessons_summary"):
+            request_outputs["prior_lessons"] = {
+                "run_id": latest_run.get("run_id"),
+                "lessons_path": latest_run.get("lessons_path"),
+                "summary": latest_run.get("lessons_summary"),
+            }
     clarification_package: dict[str, Any] | None = None
     if intent == "develop":
         blocking_questions = (
@@ -1505,6 +1685,12 @@ def _run_mutation_intent(
     existing_assets = _collect_existing_assets(target_root_path)
     if latest_run:
         existing_assets["latest_prior_run"] = latest_run
+        if intent == "evolve" and latest_run.get("lessons_summary"):
+            existing_assets["prior_lessons"] = {
+                "run_id": latest_run.get("run_id"),
+                "lessons_path": latest_run.get("lessons_path"),
+                "summary": latest_run.get("lessons_summary"),
+            }
     existing_assets["team_plan"] = team_plan_outputs
 
     if require_existing_spec and not existing_spec:
@@ -1734,10 +1920,14 @@ def _run_mutation_intent(
         },
     )
 
-    lessons_payload = {
-        "new_constraints": [],
-        "notes": f"No automatic rule updates are emitted for `{intent}` in v1.",
-    }
+    lessons_payload = _build_lessons_payload(
+        run,
+        intent,
+        validation_summary,
+        judge_summary,
+        apply_result=apply_result,
+        design_source_mode=design_source_mode,
+    )
     write_json(run_root / "outputs" / "stages" / "s6-lessons-summary.json", lessons_payload)
     _write_stage_summary(
         run,

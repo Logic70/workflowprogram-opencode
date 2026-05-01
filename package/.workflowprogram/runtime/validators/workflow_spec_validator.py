@@ -56,6 +56,7 @@ REQUIRED_GENERATED_RUNTIME_KEYS = {
     "mode",
     "runtime_capabilities",
 }
+ALLOWED_TARGET_PLUGIN_HOOK_EVENTS = {"event", "tool.execute.before", "tool.execute.after"}
 
 
 def _check(check_id: str, passed: bool, detail: str, category: str) -> dict[str, Any]:
@@ -175,6 +176,7 @@ def validate_workflow_spec(spec_path: Path) -> dict[str, Any]:
 
     templates = spec.get("templates", []) if isinstance(spec.get("templates"), list) else []
     template_ids = set()
+    template_by_id: dict[str, dict[str, Any]] = {}
     template_ok = isinstance(templates, list)
     for template in templates:
         if isinstance(template, str):
@@ -187,6 +189,7 @@ def validate_workflow_spec(spec_path: Path) -> dict[str, Any]:
         if not template_id:
             template_ok = False
         template_ids.add(template_id)
+        template_by_id[template_id] = template
         expanded_nodes = template.get("expanded_nodes", [])
         if expanded_nodes and (
             not isinstance(expanded_nodes, list)
@@ -274,6 +277,69 @@ def validate_workflow_spec(spec_path: Path) -> dict[str, Any]:
         )
     )
 
+    self_iteration_template = template_by_id.get("self-iteration-loop")
+    self_iteration_ok = True
+    self_iteration_detail = "not selected"
+    if self_iteration_template is not None:
+        max_attempts = self_iteration_template.get("max_attempts")
+        stop_conditions = self_iteration_template.get("stop_conditions")
+        route_failure_nodes = {
+            str(node_id).strip()
+            for route in intent_routes.values()
+            if isinstance(route, dict)
+            for node_id in (route.get("failure_nodes", []) if isinstance(route.get("failure_nodes", []), list) else [])
+        }
+        route_terminal_nodes = {
+            str(node_id).strip()
+            for route in intent_routes.values()
+            if isinstance(route, dict)
+            for node_id in (route.get("terminal_nodes", []) if isinstance(route.get("terminal_nodes", []), list) else [])
+        }
+        generation_nodes = {
+            node_id
+            for node_id, node in zip(node_ids, nodes)
+            if isinstance(node, dict)
+            and (
+                "generate" in node_id
+                or "repair" in node_id
+                or "candidate_bundle" in {str(output) for output in node.get("outputs", []) if isinstance(node.get("outputs", []), list)}
+            )
+        }
+        retry_ok = any(
+            isinstance(transition, dict)
+            and str(transition.get("kind", "")).strip() == "retry"
+            and str(transition.get("from", "")).strip() in route_failure_nodes
+            and str(transition.get("to", "")).strip() in generation_nodes
+            for transition in transitions
+        )
+        handoff_ok = any(
+            isinstance(transition, dict)
+            and str(transition.get("from", "")).strip() in route_failure_nodes
+            and str(transition.get("to", "")).strip() in route_terminal_nodes
+            and str(transition.get("kind", "")).strip() in {"handoff", "stop", "normal"}
+            for transition in transitions
+        )
+        self_iteration_ok = (
+            isinstance(max_attempts, int)
+            and max_attempts > 0
+            and isinstance(stop_conditions, list)
+            and bool(stop_conditions)
+            and retry_ok
+            and handoff_ok
+        )
+        self_iteration_detail = (
+            f"max_attempts={max_attempts} stop_conditions={len(stop_conditions) if isinstance(stop_conditions, list) else 'invalid'} "
+            f"failure_nodes={sorted(route_failure_nodes)} generation_nodes={sorted(generation_nodes)} retry_ok={retry_ok} handoff_ok={handoff_ok}"
+        )
+    checks.append(
+        _check(
+            "SPEC-16",
+            self_iteration_ok,
+            self_iteration_detail,
+            "design",
+        )
+    )
+
     schema_version = spec.get("schema_version")
     checks.append(
         _check(
@@ -355,6 +421,30 @@ def validate_workflow_spec(spec_path: Path) -> dict[str, Any]:
             "SPEC-07",
             plugin_optional_ok,
             f"plugins={plugins}",
+            "design",
+        )
+    )
+    plugin_hook_ok = True
+    plugin_hook_details: list[str] = []
+    for plugin in plugins:
+        hook_intents = plugin.get("hook_intents", [])
+        hook_events = plugin.get("hook_events", [])
+        plugin_name = str(plugin.get("name", plugin.get("file", "unknown")))
+        current_ok = (
+            isinstance(hook_intents, list)
+            and bool(hook_intents)
+            and all(str(item).strip() for item in hook_intents)
+            and isinstance(hook_events, list)
+            and bool(hook_events)
+            and all(str(item).strip() in ALLOWED_TARGET_PLUGIN_HOOK_EVENTS for item in hook_events)
+        )
+        plugin_hook_ok = plugin_hook_ok and current_ok
+        plugin_hook_details.append(f"{plugin_name}: intents={hook_intents} events={hook_events}")
+    checks.append(
+        _check(
+            "SPEC-17",
+            plugin_hook_ok,
+            "; ".join(plugin_hook_details) if plugin_hook_details else "plugins=[]",
             "design",
         )
     )
