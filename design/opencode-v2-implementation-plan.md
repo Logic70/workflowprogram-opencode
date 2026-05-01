@@ -44,7 +44,7 @@ v1 实施目标如下：
 | IP-12 | release artifact 可复现 | 能生成干净 `dist/opencode/` 或 archive 并校验 manifest/checksum |
 | IP-13 | 契约硬化落地 | schema version、migration、error code、apply recovery、permission/privacy 策略进入 validator |
 | IP-14 | 新项目全局引导安装 | 全局只安装 bootstrap，完整 package 仍通过 project-local 物化到当前项目 |
-| IP-15 | AI 协作层可追踪 | package command 能调度 OpenCode package agents，并把 agent 证据写入 run-state |
+| IP-15 | AI 设计路径可追踪 | package command/host 先形成 `workflow-spec.md` 与 accepted `workflow-spec.yaml`；runtime 只消费 accepted spec，agent/team-plan 证据仅作可选审计上下文 |
 
 ## 3. 实施边界
 
@@ -328,15 +328,15 @@ v1 实施目标如下：
 
 对策：
 
-- package command 先运行 `agent-team-planner.py`，明确 pre-runtime 与 post-runtime agent 调度
-- 变更型 intent 必须先尝试调度设计类 package agent，无法调度时报告 `AI-DISPATCH-SKIPPED`
-- runtime 通过 `--ai-evidence` 记录 agent 摘要，但不允许 agent 证据绕过 validator 或 managed apply
+- package command/host 先完成澄清、设计回读和 accepted `workflow-spec.yaml`
+- `agent-team-planner.py` 仅提供可选调度建议；无法调度 agent 不能被当作 mutation 成功证据
+- runtime 缺少 `--spec` 时不得默认用 Python 模板生成生产 workflow；只有显式 fixture/fallback 才允许模板路径且必须返回 WARN
 
 ## 8. 建议执行顺序
 
 1. 完成 P1，先让 package 能被宿主识别
 2. 完成 P2，先让 `/wp-develop` 能进入 runtime
-3. 完成 P8 的 AI 协作层最小能力，让 `/wp-develop` 先有 agent 设计证据再进入 runtime
+3. 完成 P8 的 AI 设计路径最小能力，让 `/wp-develop` 先形成 `workflow-spec.md` 与 accepted `workflow-spec.yaml` 再进入 runtime
 4. 完成 P3，生成最小 target design assets
 5. 完成 P4，形成最小 target bundle 与 managed apply
 6. 完成 P5，建立 `/wp-validate` 的分层校验能力
@@ -372,7 +372,7 @@ v1 实施目标如下：
 
 - 把 package agents 从静态文件集合升级为可编排团队结构。
 - 明确 agentteam 与 subagent 的区别。
-- 明确 AI 协作层与 Python runtime 的职责：agents 产出设计/评审证据，runtime 负责确定性固化、校验和写入。
+- 明确 AI 协作层与 Python runtime 的职责：host/model/agents 形成 accepted 设计，runtime 负责确定性校验、生成和写入。
 
 任务：
 
@@ -382,7 +382,7 @@ v1 实施目标如下：
 4. 实现 `agent-team-planner.py`
 5. 为 `recommended_dispatch` 增加 `pre-runtime` / `post-runtime` 调度时机
 6. 输出 `team-plan.json`、`team-plan.md`、dispatch trace、fan-in report
-7. 增加 `workflow-entry.py --ai-evidence`，把 host-mediated agent 摘要写入 run-state
+7. `workflow-entry.py --ai-evidence` 仅保留为 legacy 诊断字段；核心输入改为 `--draft` 与 `--spec`
 8. 增加 package validator 对 role registry 的校验
 
 验收：

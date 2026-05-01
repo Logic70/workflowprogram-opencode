@@ -124,7 +124,7 @@ def plan_team(package_root: Path, intent: str) -> dict[str, Any]:
             "Agentteam describes roles and review topology.",
             "OpenCode subagents remain the execution mechanism; this planner does not invoke them directly.",
             "Stage guidance is effective only when the host follows recommended_dispatch or records equivalent evidence.",
-            "Pre-runtime agent evidence can be passed to workflow-entry.py with --ai-evidence for run-state traceability.",
+            "Pre-runtime agent findings should be reflected in the accepted workflow-spec.yaml before runtime apply.",
         ],
     }
 
@@ -161,7 +161,7 @@ def team_plan_markdown(plan: dict[str, Any]) -> str:
             "",
             "- This file is a dispatch guide, not proof of execution.",
             "- Do not report that an agent ran unless its response or a dispatch trace exists.",
-            "- When pre-runtime agent evidence materially changes the design, pass a concise summary with `--ai-evidence`.",
+            "- When pre-runtime agent findings materially change the design, update the accepted `workflow-spec.yaml` before runtime apply.",
         ]
     )
     return "\n".join(lines).rstrip() + "\n"

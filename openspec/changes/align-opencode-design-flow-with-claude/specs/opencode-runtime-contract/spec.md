@@ -28,7 +28,7 @@ Runtime SHALL derive design readiness and readback confirmation from existing ev
 #### Scenario: apply is requested
 
 - **WHEN** managed apply would write target workflow assets
-- **THEN** runtime SHALL require completed readiness/handoff evidence when policy requires S1 completion
+- **THEN** runtime SHALL require completed readiness/handoff evidence when policy requires clarification/readback completion
 - **AND** a standalone CLI confirmation flag SHALL NOT be the only source of truth
 
 ## MODIFIED Requirements
@@ -42,4 +42,3 @@ OpenCode agent planning SHALL remain advisory unless its outputs are converted i
 - **WHEN** `team-plan.json` or `team-plan.md` exists
 - **THEN** runtime MAY preserve it as host-dispatch guidance
 - **AND** validators SHALL NOT require it for core develop success
-

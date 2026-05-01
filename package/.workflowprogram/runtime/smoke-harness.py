@@ -7,6 +7,7 @@ import argparse
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -35,6 +36,7 @@ def main() -> int:
     provider_judge_regression = runtime_root / "provider-judge-regression.py"
     package_validator = runtime_root / "validators" / "package_contract_validator.py"
     deploy_script = runtime_root / "package-deploy.py"
+    python_executable = sys.executable or "python3"
 
     temp_parent = Path("/tmp") if Path("/tmp").is_dir() else None
     temp_dir = tempfile.mkdtemp(prefix="workflowprogram-smoke-", dir=str(temp_parent) if temp_parent else None)
@@ -47,11 +49,11 @@ def main() -> int:
         bootstrap_project_root.mkdir(parents=True, exist_ok=True)
 
         package_result = run_cmd(
-            ["python3", str(package_validator), "--package-root", str(package_root), "--json"]
+            [python_executable, str(package_validator), "--package-root", str(package_root), "--json"]
         )
         fixture_probe_result = run_cmd(
             [
-                "python3",
+                python_executable,
                 str(runtime_host),
                 "probe",
                 "--provider",
@@ -61,7 +63,7 @@ def main() -> int:
         )
         opencode_probe_result = run_cmd(
             [
-                "python3",
+                python_executable,
                 str(runtime_host),
                 "probe",
                 "--provider",
@@ -71,14 +73,14 @@ def main() -> int:
         )
         provider_judge_regression_result = run_cmd(
             [
-                "python3",
+                python_executable,
                 str(provider_judge_regression),
                 "--json",
             ]
         )
         install_result = run_cmd(
             [
-                "python3",
+                python_executable,
                 str(deploy_script),
                 "install",
                 "--source-package-root",
@@ -92,7 +94,7 @@ def main() -> int:
         )
         status_result = run_cmd(
             [
-                "python3",
+                python_executable,
                 str(deploy_script),
                 "status",
                 "--mode",
@@ -104,7 +106,7 @@ def main() -> int:
         )
         reinstall_result = run_cmd(
             [
-                "python3",
+                python_executable,
                 str(deploy_script),
                 "install",
                 "--source-package-root",
@@ -118,7 +120,7 @@ def main() -> int:
         )
         install_bootstrap_result = run_cmd(
             [
-                "python3",
+                python_executable,
                 str(deploy_script),
                 "install-bootstrap",
                 "--source-package-root",
@@ -134,7 +136,7 @@ def main() -> int:
         )
         bootstrap_status_result = run_cmd(
             [
-                "python3",
+                python_executable,
                 str(deploy_script),
                 "bootstrap-status",
                 "--target-root",
@@ -145,7 +147,7 @@ def main() -> int:
         bootstrap_runtime = bootstrap_global_root / ".workflowprogram" / "bootstrap" / "bootstrap-runtime.py"
         bootstrap_project_install_result = run_cmd(
             [
-                "python3",
+                python_executable,
                 str(bootstrap_runtime),
                 "--global-root",
                 str(bootstrap_global_root),
@@ -157,7 +159,7 @@ def main() -> int:
         )
         bootstrap_project_status_result = run_cmd(
             [
-                "python3",
+                python_executable,
                 str(bootstrap_runtime),
                 "--global-root",
                 str(bootstrap_global_root),
@@ -171,11 +173,11 @@ def main() -> int:
         deployed_runtime_entry = deployed_runtime_root / "workflow-entry.py"
         deployed_package_validator = deployed_runtime_root / "validators" / "package_contract_validator.py"
         deployed_package_result = run_cmd(
-            ["python3", str(deployed_package_validator), "--package-root", str(install_root), "--json"]
+            [python_executable, str(deployed_package_validator), "--package-root", str(install_root), "--json"]
         )
         doctor_result = run_cmd(
             [
-                "python3",
+                python_executable,
                 str(deployed_runtime_root / "doctor.py"),
                 "--package-root",
                 str(install_root),
@@ -186,7 +188,7 @@ def main() -> int:
         )
         develop_result = run_cmd(
             [
-                "python3",
+                python_executable,
                 str(deployed_runtime_entry),
                 "develop",
                 "--package-root",
@@ -195,12 +197,14 @@ def main() -> int:
                 str(install_root),
                 "--user-arguments",
                 "smoke target workflow --emit-target-command --emit-target-plugin",
+                "--confirmed",
+                "--allow-template-fallback",
                 "--json",
             ]
         )
         preflight_result = run_cmd(
             [
-                "python3",
+                python_executable,
                 str(deployed_runtime_entry),
                 "preflight",
                 "--package-root",
@@ -214,7 +218,7 @@ def main() -> int:
         )
         hotfix_result = run_cmd(
             [
-                "python3",
+                python_executable,
                 str(deployed_runtime_entry),
                 "hotfix",
                 "--package-root",
@@ -228,7 +232,7 @@ def main() -> int:
         )
         iterate_result = run_cmd(
             [
-                "python3",
+                python_executable,
                 str(deployed_runtime_entry),
                 "iterate",
                 "--package-root",
@@ -242,7 +246,7 @@ def main() -> int:
         )
         audit_result = run_cmd(
             [
-                "python3",
+                python_executable,
                 str(deployed_runtime_entry),
                 "audit",
                 "--package-root",
@@ -256,7 +260,7 @@ def main() -> int:
         )
         evolve_result = run_cmd(
             [
-                "python3",
+                python_executable,
                 str(deployed_runtime_entry),
                 "evolve",
                 "--package-root",
@@ -270,7 +274,7 @@ def main() -> int:
         )
         orchestrate_result = run_cmd(
             [
-                "python3",
+                python_executable,
                 str(deployed_runtime_entry),
                 "orchestrate",
                 "--package-root",
@@ -284,7 +288,7 @@ def main() -> int:
         )
         ship_result = run_cmd(
             [
-                "python3",
+                python_executable,
                 str(deployed_runtime_entry),
                 "ship",
                 "--package-root",
@@ -298,7 +302,7 @@ def main() -> int:
         )
         validate_result = run_cmd(
             [
-                "python3",
+                python_executable,
                 str(deployed_runtime_entry),
                 "validate",
                 "--package-root",
@@ -310,7 +314,7 @@ def main() -> int:
         )
         host_integration_result = run_cmd(
             [
-                "python3",
+                python_executable,
                 str(host_integration_smoke),
                 "--package-root",
                 str(install_root),
@@ -323,7 +327,7 @@ def main() -> int:
         )
         target_host_result = run_cmd(
             [
-                "python3",
+                python_executable,
                 str(deployed_runtime_root / "target-host-smoke.py"),
                 "--target-root",
                 str(install_root),

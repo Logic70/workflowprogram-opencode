@@ -18,7 +18,9 @@ This plan implements the graph-shaped workflow model described in `opencode-v2-g
    - `nodes`
    - `transitions`
    - `templates`
+   - `intent_routes`
    - `context_contract`
+   - `registry`
    - `outputs`
    - `runtime_contract`
    - `generated_runtime_contract`

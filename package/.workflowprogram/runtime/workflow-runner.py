@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shlex
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -17,7 +18,6 @@ from runtime_common import (
     MANDATORY_RUNTIME_FILES,
     PRODUCT_INTENT_CONTRACT,
     SCHEMA_VERSION,
-    STAGE_SLOTS,
     DevelopRequest,
     assess_target_workflow,
     aggregate_verdicts,
@@ -72,6 +72,10 @@ class RunContext:
     created_at: str
     user_arguments: str
     ai_evidence: str
+    confirmed: bool
+    source_spec: str
+    source_draft: str
+    allow_template_fallback: bool
     package: PackageContext
     target: TargetContext
 
@@ -82,6 +86,10 @@ def _build_contexts(
     intent: str,
     user_arguments: str,
     ai_evidence: str = "",
+    confirmed: bool = False,
+    source_spec: str = "",
+    source_draft: str = "",
+    allow_template_fallback: bool = False,
 ) -> RunContext:
     layout = detect_package_layout(package_root)
     package_root = layout.package_root
@@ -95,6 +103,10 @@ def _build_contexts(
         created_at=iso_now(),
         user_arguments=user_arguments,
         ai_evidence=ai_evidence,
+        confirmed=confirmed,
+        source_spec=source_spec,
+        source_draft=source_draft,
+        allow_template_fallback=allow_template_fallback,
         package=PackageContext(
             package_root=str(package_root),
             layout_kind=layout.layout_kind,
@@ -205,9 +217,17 @@ def _bootstrap_run(run: RunContext) -> None:
             "verdict": "WARN",
             "failure_kind": None,
             "status": "running",
+            "design_input": {
+                "source_spec": run.source_spec or None,
+                "source_draft": run.source_draft or None,
+                "allow_template_fallback": run.allow_template_fallback,
+            },
             "ai_collaboration": {
+                "legacy": True,
+                "success_gate": False,
                 "evidence_supplied": bool(run.ai_evidence.strip()),
                 "evidence_summary": run.ai_evidence.strip()[:1000] if run.ai_evidence.strip() else None,
+                "interactive_confirmed": run.confirmed,
             },
         },
     )
@@ -316,9 +336,15 @@ def _write_clarification_package(
     run: RunContext,
     request: DevelopRequest,
     latest_run: dict[str, Any] | None,
+    blocking_questions: list[str] | None = None,
+    non_blocking_questions: list[str] | None = None,
+    mode: str = "direct-command",
 ) -> dict[str, str]:
     clarification_root = Path(run.run_root) / "outputs" / "clarification"
     ensure_dir(clarification_root)
+    blocking_questions = blocking_questions or []
+    non_blocking_questions = non_blocking_questions or []
+    ready = not blocking_questions
 
     clarification_record = {
         "intent": run.intent,
@@ -331,23 +357,69 @@ def _write_clarification_package(
         "generated_at": iso_now(),
     }
     open_questions = {
-        "blocking": [],
-        "non_blocking": [],
-        "summary": "No explicit clarification round was required for this direct command invocation.",
+        "blocking": blocking_questions,
+        "non_blocking": non_blocking_questions,
+        "summary": (
+            "Interactive clarification is required before generating the target workflow."
+            if blocking_questions
+            else "No explicit clarification round was required for this direct command invocation."
+        ),
     }
     readiness_report = {
-        "ready": True,
-        "clarification_mode": "direct-command",
-        "blocking_open_questions": 0,
-        "readback_confirmed": False,
-        "reason": "Explicit package command invocation produced a normalized develop request.",
+        "ready": ready,
+        "clarification_mode": mode,
+        "blocking_open_questions": len(blocking_questions),
+        "readback_confirmed": run.confirmed,
+        "reason": (
+            "The request is too broad to generate a useful workflow without a design conversation."
+            if blocking_questions
+            else "Explicit package command invocation produced a normalized develop request."
+        ),
+    }
+    challenge_report = {
+        "intent": run.intent,
+        "status": "passed" if ready else "blocked",
+        "challenge_rounds": 1 if blocking_questions else 0,
+        "blocking_questions": blocking_questions,
+        "non_blocking_questions": non_blocking_questions,
+        "reason": readiness_report["reason"],
+        "generated_at": iso_now(),
+    }
+    handoff = {
+        "intent": run.intent,
+        "ready_for_design": ready,
+        "workflow_spec_draft": str(Path(run.run_root) / "workflow-spec.md"),
+        "workflow_spec_yaml": str(Path(run.run_root) / "workflow-spec.yaml"),
+        "s2_inputs": {
+            "target_root": run.target.target_root,
+            "latest_prior_run": latest_run,
+            "request_summary": request.summary,
+        },
+        "s3_inputs": {
+            "accepted_spec_required": True,
+            "accepted_spec_path": run.source_spec or None,
+            "draft_path": run.source_draft or None,
+        },
+    }
+    evidence = {
+        "intent": run.intent,
+        "readback_confirmed": run.confirmed,
+        "clarification_rounds": 0 if run.confirmed else 1,
+        "challenge_rounds": challenge_report["challenge_rounds"],
+        "blocking_open_questions": len(blocking_questions),
+        "legacy_ai_evidence_supplied": bool(run.ai_evidence.strip()),
+        "legacy_ai_evidence_success_gate": False,
     }
     assumption_log = "\n".join(
         [
             "# Assumption Log",
             "",
             "- The direct `/wp-develop` invocation is treated as an explicit intent selection.",
-            "- No additional clarification questions were required for this run.",
+            (
+                "- Generation is blocked until the user answers the clarification questions and confirms the design readback."
+                if blocking_questions
+                else "- No additional clarification questions were required for this run."
+            ),
             "",
         ]
     )
@@ -355,16 +427,25 @@ def _write_clarification_package(
     clarification_record_path = clarification_root / "clarification-record.json"
     open_questions_path = clarification_root / "open-questions.json"
     readiness_report_path = clarification_root / "design-readiness-report.json"
+    challenge_report_path = clarification_root / "clarification-challenge-report.json"
+    handoff_path = clarification_root / "clarification-handoff.json"
+    evidence_path = clarification_root / "clarification-evidence.json"
     assumption_log_path = clarification_root / "assumption-log.md"
     write_json(clarification_record_path, clarification_record)
     write_json(open_questions_path, open_questions)
     write_json(readiness_report_path, readiness_report)
+    write_json(challenge_report_path, challenge_report)
+    write_json(handoff_path, handoff)
+    write_json(evidence_path, evidence)
     write_text(assumption_log_path, assumption_log)
 
     return {
         "clarification_record": str(clarification_record_path),
         "open_questions": str(open_questions_path),
         "design_readiness_report": str(readiness_report_path),
+        "clarification_challenge_report": str(challenge_report_path),
+        "clarification_handoff": str(handoff_path),
+        "clarification_evidence": str(evidence_path),
         "assumption_log": str(assumption_log_path),
     }
 
@@ -373,14 +454,38 @@ def _load_clarification_package(artifact_paths: dict[str, str]) -> dict[str, Any
     clarification_record = read_json(Path(artifact_paths["clarification_record"]))
     open_questions = read_json(Path(artifact_paths["open_questions"]))
     design_readiness = read_json(Path(artifact_paths["design_readiness_report"]))
+    challenge_report = read_json(Path(artifact_paths["clarification_challenge_report"]))
+    handoff = read_json(Path(artifact_paths["clarification_handoff"]))
+    evidence = read_json(Path(artifact_paths["clarification_evidence"]))
     assumption_log = Path(artifact_paths["assumption_log"]).read_text(encoding="utf-8")
     return {
         "clarification_record": clarification_record,
         "open_questions": open_questions,
         "design_readiness_report": design_readiness,
+        "clarification_challenge_report": challenge_report,
+        "clarification_handoff": handoff,
+        "clarification_evidence": evidence,
         "assumption_log": assumption_log,
     }
 
+
+def _argument_confirms(user_arguments: str) -> bool:
+    try:
+        tokens = set(shlex.split(user_arguments))
+    except ValueError:
+        tokens = set(user_arguments.split())
+    return bool(tokens.intersection({"--confirmed", "--yes"}))
+
+
+def _interactive_clarification_questions(request: DevelopRequest) -> list[str]:
+    summary = request.summary.strip() or "the requested workflow"
+    return [
+        f"For `{summary}`, what exact target object should the workflow operate on?",
+        "What final deliverables should the workflow produce?",
+        "Which tools and boundaries are allowed for analysis, execution, decompilation, tracing, or debugging?",
+        "Which graph nodes, branch/fan-in points, and human confirmation points must be preserved?",
+        "Should the generated target workflow expose an OpenCode command or plugin entry point? If yes, what names?",
+    ]
 
 def _load_runtime_module(script_name: str, module_name: str):
     script_path = Path(__file__).resolve().parent / script_name
@@ -484,6 +589,171 @@ def _build_workflow_spec(
     if registry_plugins:
         runtime_capabilities.append("target_plugin_bridge")
 
+    templates = [
+        {
+            "id": "clarification-loop",
+            "name": "Clarification Loop",
+            "purpose": "Resolve ambiguous workflow goals before graph execution.",
+            "when_to_use": "Use when user intent, deliverables, tools, or boundaries are underspecified.",
+            "expanded_nodes": ["clarify-requirements"],
+        },
+        {
+            "id": "validation-loop",
+            "name": "Validation Loop",
+            "purpose": "Run layered validation and route failures back to implementation work.",
+            "when_to_use": "Use for generated workflows that must be checked before managed apply is considered complete.",
+            "expanded_nodes": ["validate-generated-workflow", "iterate-on-failures"],
+        },
+        {
+            "id": "merge-fan-in",
+            "name": "Merge Fan-In",
+            "purpose": "Collect successful and accepted-warning paths before terminal evidence is recorded.",
+            "when_to_use": "Use when multiple execution branches must converge before completion.",
+            "expanded_nodes": ["record-lessons"],
+        },
+        {
+            "id": "handoff",
+            "name": "Handoff",
+            "purpose": "Record terminal evidence, residual risks, and next action guidance.",
+            "when_to_use": "Use when workflow execution needs a clear terminal handoff artifact.",
+            "expanded_nodes": ["record-lessons"],
+        },
+    ]
+    if request.complexity in {"L", "XL"}:
+        templates.append(
+            {
+                "id": "self-iteration-loop",
+                "name": "Self Iteration Loop",
+                "purpose": "Iterate on failed checks until exit conditions are met.",
+                "when_to_use": "Use for larger workflow designs where validation feedback is expected.",
+                "expanded_nodes": ["iterate-on-failures", "generate-target-bundle"],
+            }
+        )
+
+    nodes = [
+        {
+            "id": "clarify-requirements",
+            "name": "Clarify Requirements",
+            "purpose": "Capture user goals, open questions, assumptions, and confirmation evidence.",
+            "inputs": ["user_arguments", "latest_prior_run"],
+            "outputs": ["clarification_package", "workflow_spec_draft"],
+            "preconditions": ["user intent is available"],
+            "postconditions": ["blocking questions are answered or recorded"],
+            "templates": ["clarification-loop"],
+        },
+        {
+            "id": "review-target-context",
+            "name": "Review Target Context",
+            "purpose": "Inspect target project boundaries, existing workflow assets, and host capabilities.",
+            "inputs": ["target_root", "diagnostics"],
+            "outputs": ["target_context_summary"],
+            "preconditions": ["target root is resolved"],
+            "postconditions": ["write boundaries and existing assets are known"],
+            "templates": [],
+        },
+        {
+            "id": "design-workflow-graph",
+            "name": "Design Workflow Graph",
+            "purpose": "Produce the accepted machine workflow graph and selected capability templates.",
+            "inputs": ["workflow_spec_draft", "clarification_package", "target_context_summary"],
+            "outputs": ["workflow_spec_yaml"],
+            "preconditions": ["design readback is confirmed"],
+            "postconditions": ["accepted workflow-spec.yaml is available"],
+            "templates": [],
+        },
+        {
+            "id": "generate-target-bundle",
+            "name": "Generate Target Bundle",
+            "purpose": "Derive target design, runtime, and optional OpenCode assets from the accepted graph spec.",
+            "inputs": ["workflow_spec_yaml"],
+            "outputs": ["candidate_bundle"],
+            "preconditions": ["workflow spec validation passes"],
+            "postconditions": ["candidate bundle exists"],
+            "templates": [],
+        },
+        {
+            "id": "validate-generated-workflow",
+            "name": "Validate Generated Workflow",
+            "purpose": "Validate generated artifacts, target bundle policy, and run-state evidence.",
+            "inputs": ["candidate_bundle", "managed_apply_result"],
+            "outputs": ["validation_summary"],
+            "preconditions": ["candidate bundle was applied or is available for validation"],
+            "postconditions": ["validation verdict is recorded"],
+            "templates": ["validation-loop"],
+        },
+        {
+            "id": "iterate-on-failures",
+            "name": "Iterate On Failures",
+            "purpose": "Route validation or generation failures back to graph or bundle work when recoverable.",
+            "inputs": ["validation_summary"],
+            "outputs": ["iteration_decision"],
+            "preconditions": ["validation verdict is FAIL or WARN"],
+            "postconditions": ["retry, stop, or handoff decision is recorded"],
+            "templates": ["validation-loop"] + (["self-iteration-loop"] if request.complexity in {"L", "XL"} else []),
+        },
+        {
+            "id": "record-lessons",
+            "name": "Record Lessons",
+            "purpose": "Capture final constraints, residual risks, and follow-up evidence.",
+            "inputs": ["validation_summary", "managed_apply_result"],
+            "outputs": ["lessons_summary"],
+            "preconditions": ["workflow has reached a terminal verdict"],
+            "postconditions": ["lessons and final run state are recorded"],
+            "templates": ["merge-fan-in", "handoff"],
+        },
+    ]
+
+    transitions = [
+        {
+            "from": "clarify-requirements",
+            "to": "review-target-context",
+            "kind": "normal",
+            "condition": "clarification is complete or explicitly confirmed",
+        },
+        {
+            "from": "review-target-context",
+            "to": "design-workflow-graph",
+            "kind": "normal",
+            "condition": "target context evidence is available",
+        },
+        {
+            "from": "design-workflow-graph",
+            "to": "generate-target-bundle",
+            "kind": "normal",
+            "condition": "accepted graph spec validates",
+        },
+        {
+            "from": "generate-target-bundle",
+            "to": "validate-generated-workflow",
+            "kind": "normal",
+            "condition": "candidate bundle is generated and managed apply has no conflicts",
+        },
+        {
+            "from": "validate-generated-workflow",
+            "to": "iterate-on-failures",
+            "kind": "retry",
+            "condition": "validation returns FAIL or recoverable WARN",
+        },
+        {
+            "from": "iterate-on-failures",
+            "to": "generate-target-bundle",
+            "kind": "retry",
+            "condition": "iteration decision allows retry",
+        },
+        {
+            "from": "validate-generated-workflow",
+            "to": "record-lessons",
+            "kind": "normal",
+            "condition": "validation reaches terminal PASS or accepted WARN",
+        },
+        {
+            "from": "iterate-on-failures",
+            "to": "record-lessons",
+            "kind": "handoff",
+            "condition": "iteration stops with unresolved or accepted residual work",
+        },
+    ]
+
     return {
         "schema_version": SCHEMA_VERSION,
         "meta": {
@@ -506,47 +776,67 @@ def _build_workflow_spec(
                 else None
             ),
         },
-        "stages": [
-            {"id": "clarify", "stage_slot": "S1", "name": "Requirement Clarification", "pattern": "Explore"},
-            {"id": "context", "stage_slot": "S2", "name": "Target Context Review", "pattern": "Explore"},
-            {"id": "design", "stage_slot": "S3", "name": "Workflow Spec Design", "pattern": "Specialized Agent"},
-            {"id": "generate", "stage_slot": "S4", "name": "Target Bundle Generation", "pattern": "Sequential"},
-            {"id": "validate", "stage_slot": "S5", "name": "Layered Validation", "pattern": "Test-Driven"},
-            {"id": "lessons", "stage_slot": "S6", "name": "Constraint Closure", "pattern": "Sequential"},
-        ],
-        "intent_flows": {
+        "nodes": nodes,
+        "transitions": transitions,
+        "templates": templates,
+        "intent_routes": {
             "develop": {
-                "required_stage_slots": list(STAGE_SLOTS),
-                "optional_stage_slots": [],
-            },
-            "preflight": {
-                "required_stage_slots": ["S2", "S5"],
-                "optional_stage_slots": ["S6"],
-            },
-            "hotfix": {
-                "required_stage_slots": ["S2", "S3", "S4", "S5"],
-                "optional_stage_slots": ["S6"],
+                "entry_node": "clarify-requirements",
+                "terminal_nodes": ["record-lessons"],
+                "failure_nodes": ["iterate-on-failures"],
+                "path": [
+                    "clarify-requirements",
+                    "review-target-context",
+                    "design-workflow-graph",
+                    "generate-target-bundle",
+                    "validate-generated-workflow",
+                    "record-lessons",
+                ],
             },
             "validate": {
-                "required_stage_slots": ["S5"],
-                "optional_stage_slots": ["S6"],
+                "entry_node": "validate-generated-workflow",
+                "terminal_nodes": ["record-lessons"],
+                "failure_nodes": ["iterate-on-failures"],
+                "path": ["validate-generated-workflow", "record-lessons"],
             },
             "iterate": {
-                "required_stage_slots": ["S2", "S3", "S4", "S5", "S6"],
-                "optional_stage_slots": [],
+                "entry_node": "iterate-on-failures",
+                "terminal_nodes": ["record-lessons"],
+                "failure_nodes": ["iterate-on-failures"],
+                "path": ["iterate-on-failures", "generate-target-bundle", "validate-generated-workflow", "record-lessons"],
             },
-            "ship": {
-                "required_stage_slots": ["S5", "S6"],
-                "optional_stage_slots": [],
-            },
-            "audit": {
-                "required_stage_slots": ["S5"],
-                "optional_stage_slots": ["S6"],
+            "hotfix": {
+                "entry_node": "review-target-context",
+                "terminal_nodes": ["record-lessons"],
+                "failure_nodes": ["iterate-on-failures"],
+                "path": ["review-target-context", "design-workflow-graph", "generate-target-bundle", "validate-generated-workflow", "record-lessons"],
             },
             "evolve": {
-                "required_stage_slots": ["S2", "S3", "S4", "S5", "S6"],
-                "optional_stage_slots": [],
+                "entry_node": "review-target-context",
+                "terminal_nodes": ["record-lessons"],
+                "failure_nodes": ["iterate-on-failures"],
+                "path": ["review-target-context", "design-workflow-graph", "generate-target-bundle", "validate-generated-workflow", "record-lessons"],
             },
+        },
+        "context_contract": {
+            "shared_inputs": [
+                {"key": "user_arguments", "source": "package command arguments"},
+                {"key": "target_root", "source": "resolved command context"},
+                {"key": "latest_prior_run", "source": "target .workflowprogram/runs when available"},
+            ],
+            "shared_outputs": [
+                {"key": "workflow_spec_yaml", "path": "workflow-spec.yaml"},
+                {"key": "candidate_bundle", "path": "outputs/candidate"},
+                {"key": "validation_summary", "path": "validation-summary.json"},
+            ],
+            "authoritative_sources": [
+                {"key": "accepted_workflow_spec", "path": "workflow-spec.yaml"},
+                {"key": "managed_apply_result", "path": "outputs/managed-change-result.json"},
+            ],
+            "derived_data": [
+                {"key": "workflow_view", "path": "workflow-view.md", "derived_from": "accepted_workflow_spec"},
+                {"key": "workflow_lowlevel", "path": "workflow-lowlevel.md", "derived_from": "accepted_workflow_spec"},
+            ],
         },
         "registry": {
             "commands": registry_commands,
@@ -619,11 +909,12 @@ def _build_workflow_spec(
                 "conflict_expectation": "keep-candidate-and-report",
             },
             "flow": {
-                "required_stage_slots": list(STAGE_SLOTS),
+                "entry_node": "clarify-requirements",
+                "terminal_nodes": ["record-lessons"],
                 "failure_recovery": {
-                    "design": "S3",
-                    "implementation": "S4",
-                    "conflict": "S4",
+                    "design": "design-workflow-graph",
+                    "implementation": "generate-target-bundle",
+                    "conflict": "generate-target-bundle",
                 },
             },
             "artifacts": {
@@ -640,6 +931,10 @@ def _build_workflow_spec(
 
 
 def _build_view_markdown(spec: dict[str, Any], request: DevelopRequest) -> str:
+    nodes = spec.get("nodes", []) if isinstance(spec.get("nodes"), list) else []
+    transitions = spec.get("transitions", []) if isinstance(spec.get("transitions"), list) else []
+    templates = spec.get("templates", []) if isinstance(spec.get("templates"), list) else []
+    intent_routes = spec.get("intent_routes", {}) if isinstance(spec.get("intent_routes"), dict) else {}
     lines = [
         "# Target Workflow View",
         "",
@@ -648,11 +943,37 @@ def _build_view_markdown(spec: dict[str, Any], request: DevelopRequest) -> str:
         f"- Complexity: `{spec['meta']['complexity']}`",
         f"- Request: {request.summary}",
         "",
-        "## Intent Flows",
+        "## Workflow Nodes",
         "",
     ]
-    for intent, flow in spec["intent_flows"].items():
-        lines.append(f"- `{intent}` -> {', '.join(flow['required_stage_slots'])}")
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        lines.append(f"- `{node.get('id', 'unknown')}`: {node.get('name', 'Unnamed node')}")
+    lines.extend(["", "## Transitions", ""])
+    for transition in transitions:
+        if not isinstance(transition, dict):
+            continue
+        lines.append(
+            f"- `{transition.get('from', '?')}` -> `{transition.get('to', '?')}` "
+            f"({transition.get('kind', 'normal')}): {transition.get('condition', 'always')}"
+        )
+    lines.extend(["", "## Intent Routes", ""])
+    for intent, route in intent_routes.items():
+        if not isinstance(route, dict):
+            continue
+        path = route.get("path", [])
+        path_text = " -> ".join(str(item) for item in path) if isinstance(path, list) else str(path)
+        lines.append(f"- `{intent}`: {path_text}")
+    lines.extend(["", "## Capability Templates", ""])
+    if templates:
+        for template in templates:
+            if isinstance(template, dict):
+                lines.append(f"- `{template.get('id', 'unknown')}`: {template.get('name', 'Unnamed template')}")
+            else:
+                lines.append(f"- `{template}`")
+    else:
+        lines.append("- None selected")
     lines.extend(["", "## Deliverables", ""])
     for path in spec["outputs"]["required"]:
         lines.append(f"- `{path}`")
@@ -662,6 +983,9 @@ def _build_view_markdown(spec: dict[str, Any], request: DevelopRequest) -> str:
 def _build_lowlevel_markdown(spec: dict[str, Any], request: DevelopRequest) -> str:
     command_mode = "enabled" if spec["registry"]["commands"] else "disabled"
     plugin_mode = "enabled" if spec["registry"]["plugins"] else "disabled"
+    nodes = spec.get("nodes", []) if isinstance(spec.get("nodes"), list) else []
+    transitions = spec.get("transitions", []) if isinstance(spec.get("transitions"), list) else []
+    context_contract = spec.get("context_contract", {}) if isinstance(spec.get("context_contract"), dict) else {}
     lines = [
         "# Target Workflow LowLevel Guide",
         "",
@@ -670,6 +994,8 @@ def _build_lowlevel_markdown(spec: dict[str, Any], request: DevelopRequest) -> s
         f"- Request: {request.summary}",
         f"- Target commands: {command_mode}",
         f"- Target plugins: {plugin_mode}",
+        f"- Graph nodes: {len(nodes)}",
+        f"- Graph transitions: {len(transitions)}",
         "",
         "## Runtime Contract",
         "",
@@ -677,12 +1003,122 @@ def _build_lowlevel_markdown(spec: dict[str, Any], request: DevelopRequest) -> s
         "- Managed apply rejects unmanaged overwrite and preserves conflict copies.",
         "- Validation is layered: package, spec, target, run-state.",
         "",
-        "## Required Files",
+        "## Context Contract",
         "",
     ]
+    for key in ("shared_inputs", "shared_outputs", "authoritative_sources", "derived_data"):
+        values = context_contract.get(key, [])
+        if not isinstance(values, list):
+            values = []
+        lines.append(f"- `{key}`: {len(values)} item(s)")
+    lines.extend(
+        [
+            "",
+            "## Required Files",
+            "",
+        ]
+    )
     for path in spec["outputs"]["required"]:
         lines.append(f"- `{path}`")
     return "\n".join(lines) + "\n"
+
+
+def _resolve_source_path(raw_path: str) -> Path | None:
+    value = raw_path.strip()
+    if not value:
+        return None
+    return Path(value).expanduser().resolve()
+
+
+def _draft_markdown_from_spec(spec: dict[str, Any], request: DevelopRequest, source_spec: Path) -> str:
+    meta = spec.get("meta", {}) if isinstance(spec.get("meta"), dict) else {}
+    nodes = spec.get("nodes", []) if isinstance(spec.get("nodes"), list) else []
+    lines = [
+        "# Workflow Spec Draft",
+        "",
+        "This run consumed an accepted `workflow-spec.yaml` as the design authority.",
+        "",
+        f"- Accepted spec: `{source_spec}`",
+        f"- Name: `{meta.get('name', request.spec_name)}`",
+        f"- Request: {meta.get('request_summary', request.summary)}",
+        "",
+        "## Workflow Nodes",
+        "",
+    ]
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        lines.append(f"- `{node.get('id', 'unknown')}` {node.get('name', 'Unnamed node')}")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _materialize_accepted_design(
+    run: RunContext,
+    request: DevelopRequest,
+    source_spec_path: Path,
+    source_draft_path: Path | None,
+    intent: str,
+) -> tuple[dict[str, Any], Path, Path, Path, Path]:
+    if not source_spec_path.is_file():
+        raise FileNotFoundError(f"Accepted workflow spec not found: {source_spec_path}")
+    spec = read_yaml(source_spec_path)
+    if not isinstance(spec, dict):
+        raise ValueError(f"Accepted workflow spec must be a YAML mapping: {source_spec_path}")
+
+    meta = spec.setdefault("meta", {})
+    if isinstance(meta, dict):
+        meta["source_intent"] = intent
+        meta.setdefault("request_summary", request.summary)
+
+    run_root = Path(run.run_root)
+    spec_path = run_root / "workflow-spec.yaml"
+    draft_path = run_root / "workflow-spec.md"
+    view_path = run_root / "workflow-view.md"
+    lowlevel_path = run_root / "workflow-lowlevel.md"
+
+    write_yaml(spec_path, spec)
+    if source_draft_path and source_draft_path.is_file():
+        write_text(draft_path, source_draft_path.read_text(encoding="utf-8"))
+    else:
+        write_text(draft_path, _draft_markdown_from_spec(spec, request, source_spec_path))
+    write_text(view_path, _build_view_markdown(spec, request))
+    write_text(lowlevel_path, _build_lowlevel_markdown(spec, request))
+    return spec, spec_path, draft_path, view_path, lowlevel_path
+
+
+def _materialize_template_fallback_design(
+    run: RunContext,
+    request: DevelopRequest,
+    clarification_package: dict[str, Any] | None,
+    intent: str,
+) -> tuple[dict[str, Any], Path, Path, Path, Path]:
+    spec = _build_workflow_spec(run, request, clarification_package)
+    spec["meta"]["source_intent"] = intent
+    spec["meta"]["source_design_mode"] = "template_fallback"
+    run_root = Path(run.run_root)
+    spec_path = run_root / "workflow-spec.yaml"
+    draft_path = run_root / "workflow-spec.md"
+    view_path = run_root / "workflow-view.md"
+    lowlevel_path = run_root / "workflow-lowlevel.md"
+    write_yaml(spec_path, spec)
+    write_text(
+        draft_path,
+        "\n".join(
+            [
+                "# Workflow Spec Draft",
+                "",
+                "Template fallback was explicitly allowed for this run.",
+                "This artifact is not evidence of AI-driven workflow design.",
+                "",
+                f"- Request: {request.summary}",
+                f"- Intent: `{intent}`",
+                "",
+            ]
+        ),
+    )
+    write_text(view_path, _build_view_markdown(spec, request))
+    write_text(lowlevel_path, _build_lowlevel_markdown(spec, request))
+    return spec, spec_path, draft_path, view_path, lowlevel_path
 
 
 def _target_runtime_entry(spec_name: str) -> str:
@@ -918,6 +1354,37 @@ def _missing_target_result(run: RunContext, intent: str, message: str, existing_
     }
 
 
+def _missing_design_input_result(
+    run: RunContext,
+    intent: str,
+    message: str,
+    outputs: dict[str, Any],
+) -> dict[str, Any]:
+    _write_stage_summary(
+        run,
+        "S3",
+        "design",
+        "WARN",
+        message,
+        outputs=outputs,
+    )
+    _set_terminal_state(
+        run,
+        "WARN",
+        "design",
+        message,
+        design_input=outputs,
+    )
+    return {
+        "intent": intent,
+        "verdict": "WARN",
+        "summary": message,
+        "run_root": run.run_root,
+        "design_input": outputs,
+        "exit_code": 0,
+    }
+
+
 def _run_mutation_intent(
     intent: str,
     package_root: Path,
@@ -926,8 +1393,23 @@ def _run_mutation_intent(
     *,
     require_existing_spec: bool,
     ai_evidence: str = "",
+    confirmed: bool = False,
+    source_spec: str = "",
+    source_draft: str = "",
+    allow_template_fallback: bool = False,
 ) -> dict[str, Any]:
-    run = _build_contexts(package_root, target_root, intent, user_arguments, ai_evidence=ai_evidence)
+    confirmed = confirmed or _argument_confirms(user_arguments)
+    run = _build_contexts(
+        package_root,
+        target_root,
+        intent,
+        user_arguments,
+        ai_evidence=ai_evidence,
+        confirmed=confirmed,
+        source_spec=source_spec,
+        source_draft=source_draft,
+        allow_template_fallback=allow_template_fallback,
+    )
     _bootstrap_run(run)
 
     run_root = Path(run.run_root)
@@ -950,9 +1432,10 @@ def _run_mutation_intent(
     request_outputs: dict[str, Any] = {
         "summary": request.summary,
         "team_plan": team_plan_outputs,
-        "ai_collaboration": {
+        "legacy_ai_evidence": {
             "evidence_supplied": bool(run.ai_evidence.strip()),
             "evidence_summary": run.ai_evidence.strip()[:1000] if run.ai_evidence.strip() else None,
+            "success_gate": False,
         },
     }
     if inherited_identity:
@@ -961,7 +1444,18 @@ def _run_mutation_intent(
         request_outputs["latest_prior_run"] = latest_run
     clarification_package: dict[str, Any] | None = None
     if intent == "develop":
-        clarification_paths = _write_clarification_package(run, request, latest_run)
+        blocking_questions = (
+            []
+            if run.confirmed
+            else _interactive_clarification_questions(request)
+        )
+        clarification_paths = _write_clarification_package(
+            run,
+            request,
+            latest_run,
+            blocking_questions=blocking_questions,
+            mode="interactive-required" if blocking_questions else "direct-command",
+        )
         clarification_package = _load_clarification_package(clarification_paths)
         request_outputs["clarification_package"] = clarification_paths
         request_outputs["clarification_consumed"] = {
@@ -971,6 +1465,34 @@ def _run_mutation_intent(
                 "blocking_open_questions"
             ),
         }
+        if blocking_questions:
+            _write_stage_summary(
+                run,
+                "S1",
+                "clarify",
+                "WARN",
+                "Interactive clarification is required before generating the target workflow.",
+                outputs=request_outputs,
+            )
+            _set_terminal_state(
+                run,
+                "WARN",
+                None,
+                "Develop requires interactive clarification before generation.",
+                clarification=clarification_package,
+                team_plan=team_plan_outputs,
+                diagnostics=diagnostic_outputs,
+            )
+            return {
+                "intent": intent,
+                "verdict": "WARN",
+                "summary": "Interactive clarification required. Answer the blocking questions, confirm the design readback, then rerun /wp-develop with --confirmed.",
+                "run_root": run.run_root,
+                "clarification": clarification_package,
+                "team_plan": team_plan_outputs,
+                "diagnostics": diagnostic_outputs,
+                "exit_code": 0,
+            }
     _write_stage_summary(
         run,
         "S1",
@@ -1022,24 +1544,104 @@ def _run_mutation_intent(
         outputs=existing_assets,
     )
 
-    spec = _build_workflow_spec(run, request, clarification_package)
-    spec["meta"]["source_intent"] = intent
-    spec_path = run_root / "workflow-spec.yaml"
-    view_path = run_root / "workflow-view.md"
-    lowlevel_path = run_root / "workflow-lowlevel.md"
-    write_yaml(spec_path, spec)
-    write_text(view_path, _build_view_markdown(spec, request))
-    write_text(lowlevel_path, _build_lowlevel_markdown(spec, request))
+    explicit_source_spec_path = _resolve_source_path(source_spec)
+    source_draft_path = _resolve_source_path(source_draft)
+    existing_target_spec_path = target_root_path / ".workflowprogram" / "design" / "workflow-spec.yaml"
+    source_spec_path = explicit_source_spec_path
+    design_source_mode = "accepted_spec"
+    if source_spec_path is None and require_existing_spec and existing_target_spec_path.is_file():
+        source_spec_path = existing_target_spec_path
+        design_source_mode = "existing_target_spec"
+
+    if source_spec_path is None and not allow_template_fallback:
+        return _missing_design_input_result(
+            run,
+            intent,
+            "Accepted workflow-spec.yaml is required before runtime generation; legacy --ai-evidence is not design proof.",
+            {
+                "required": "workflow-spec.yaml",
+                "optional_draft": "workflow-spec.md",
+                "source_spec": source_spec or None,
+                "source_draft": source_draft or None,
+                "legacy_ai_evidence_supplied": bool(run.ai_evidence.strip()),
+                "allow_template_fallback": allow_template_fallback,
+                "applied": False,
+            },
+        )
+    if (
+        intent == "develop"
+        and source_spec_path is not None
+        and design_source_mode == "accepted_spec"
+        and (source_draft_path is None or not source_draft_path.is_file())
+    ):
+        return _missing_design_input_result(
+            run,
+            intent,
+            "Accepted workflow-spec.md draft/readback is required with workflow-spec.yaml before develop generation.",
+            {
+                "required": "workflow-spec.md",
+                "source_spec": str(source_spec_path),
+                "source_draft": source_draft or None,
+                "legacy_ai_evidence_supplied": bool(run.ai_evidence.strip()),
+                "allow_template_fallback": allow_template_fallback,
+                "applied": False,
+            },
+        )
+
+    try:
+        if source_spec_path is not None:
+            spec, spec_path, draft_path, view_path, lowlevel_path = _materialize_accepted_design(
+                run,
+                request,
+                source_spec_path,
+                source_draft_path,
+                intent,
+            )
+        else:
+            design_source_mode = "template_fallback"
+            spec, spec_path, draft_path, view_path, lowlevel_path = _materialize_template_fallback_design(
+                run,
+                request,
+                clarification_package,
+                intent,
+            )
+    except Exception as exc:
+        return _missing_design_input_result(
+            run,
+            intent,
+            f"Accepted workflow design input could not be consumed: {exc}",
+            {
+                "source_spec": str(source_spec_path) if source_spec_path else None,
+                "source_draft": str(source_draft_path) if source_draft_path else None,
+                "allow_template_fallback": allow_template_fallback,
+                "applied": False,
+            },
+        )
+
     spec_validation = validate_workflow_spec(spec_path)
+    design_stage_status = spec_validation["verdict"]
+    if design_source_mode == "template_fallback" and design_stage_status == "PASS":
+        design_stage_status = "WARN"
     _write_stage_summary(
         run,
         "S3",
         "design",
-        spec_validation["verdict"],
-        f"Workflow spec generated and validated for `{intent}`.",
+        design_stage_status,
+        (
+            f"Workflow spec consumed and validated for `{intent}`."
+            if design_source_mode != "template_fallback"
+            else f"Workflow spec generated from explicit template fallback for `{intent}`."
+        ),
         outputs={
             "spec_path": str(spec_path),
+            "draft_path": str(draft_path),
+            "view_path": str(view_path),
+            "lowlevel_path": str(lowlevel_path),
+            "design_source_mode": design_source_mode,
+            "source_spec": str(source_spec_path) if source_spec_path else None,
+            "source_draft": str(source_draft_path) if source_draft_path else None,
             "spec_verdict": spec_validation["verdict"],
+            "template_fallback_warning": design_source_mode == "template_fallback",
             "clarification_consumed": (
                 {
                     "ready": clarification_package["design_readiness_report"].get("ready"),
@@ -1159,6 +1761,8 @@ def _run_mutation_intent(
     )
 
     final_verdict = judge_summary["verdict"]
+    if design_source_mode == "template_fallback" and final_verdict == "PASS":
+        final_verdict = "WARN"
     failure_kind = judge_summary.get("failure_kind")
     _set_terminal_state(
         run,
@@ -1167,6 +1771,7 @@ def _run_mutation_intent(
         f"{intent.capitalize()} pipeline completed.",
         managed_apply=apply_result,
         diagnostics=diagnostic_outputs,
+        design_source_mode=design_source_mode,
         validation=validation_summary,
         judge=judge_summary,
     )
@@ -1176,12 +1781,16 @@ def _run_mutation_intent(
         "iterate": "Existing target workflow iterated and reapplied.",
         "evolve": "Existing target workflow evolved through managed apply.",
     }
+    summary = summary_by_intent[intent]
+    if design_source_mode == "template_fallback":
+        summary = f"{summary} Explicit template fallback was used; this is not the normal AI-designed path."
     return {
         "intent": intent,
         "verdict": final_verdict,
-        "summary": summary_by_intent[intent],
+        "summary": summary,
         "run_root": run.run_root,
         "spec_path": str(Path(run.target.design_root) / "workflow-spec.yaml"),
+        "design_source_mode": design_source_mode,
         "managed_apply": apply_result,
         "diagnostics": diagnostic_outputs,
         "team_plan": team_plan_outputs,
@@ -1196,6 +1805,10 @@ def run_develop(
     target_root: Path,
     user_arguments: str,
     ai_evidence: str = "",
+    confirmed: bool = False,
+    source_spec: str = "",
+    source_draft: str = "",
+    allow_template_fallback: bool = False,
 ) -> dict[str, Any]:
     return _run_mutation_intent(
         "develop",
@@ -1204,6 +1817,10 @@ def run_develop(
         user_arguments,
         require_existing_spec=False,
         ai_evidence=ai_evidence,
+        confirmed=confirmed,
+        source_spec=source_spec,
+        source_draft=source_draft,
+        allow_template_fallback=allow_template_fallback,
     )
 
 
@@ -1212,6 +1829,10 @@ def run_hotfix(
     target_root: Path,
     user_arguments: str,
     ai_evidence: str = "",
+    confirmed: bool = False,
+    source_spec: str = "",
+    source_draft: str = "",
+    allow_template_fallback: bool = False,
 ) -> dict[str, Any]:
     return _run_mutation_intent(
         "hotfix",
@@ -1220,6 +1841,10 @@ def run_hotfix(
         user_arguments,
         require_existing_spec=True,
         ai_evidence=ai_evidence,
+        confirmed=confirmed,
+        source_spec=source_spec,
+        source_draft=source_draft,
+        allow_template_fallback=allow_template_fallback,
     )
 
 
@@ -1228,6 +1853,10 @@ def run_iterate(
     target_root: Path,
     user_arguments: str,
     ai_evidence: str = "",
+    confirmed: bool = False,
+    source_spec: str = "",
+    source_draft: str = "",
+    allow_template_fallback: bool = False,
 ) -> dict[str, Any]:
     return _run_mutation_intent(
         "iterate",
@@ -1236,6 +1865,10 @@ def run_iterate(
         user_arguments,
         require_existing_spec=True,
         ai_evidence=ai_evidence,
+        confirmed=confirmed,
+        source_spec=source_spec,
+        source_draft=source_draft,
+        allow_template_fallback=allow_template_fallback,
     )
 
 
@@ -1244,6 +1877,10 @@ def run_evolve(
     target_root: Path,
     user_arguments: str,
     ai_evidence: str = "",
+    confirmed: bool = False,
+    source_spec: str = "",
+    source_draft: str = "",
+    allow_template_fallback: bool = False,
 ) -> dict[str, Any]:
     return _run_mutation_intent(
         "evolve",
@@ -1252,6 +1889,10 @@ def run_evolve(
         user_arguments,
         require_existing_spec=True,
         ai_evidence=ai_evidence,
+        confirmed=confirmed,
+        source_spec=source_spec,
+        source_draft=source_draft,
+        allow_template_fallback=allow_template_fallback,
     )
 
 
@@ -1260,8 +1901,16 @@ def run_validate(
     target_root: Path,
     user_arguments: str,
     ai_evidence: str = "",
+    confirmed: bool = False,
 ) -> dict[str, Any]:
-    run = _build_contexts(package_root, target_root, "validate", user_arguments, ai_evidence=ai_evidence)
+    run = _build_contexts(
+        package_root,
+        target_root,
+        "validate",
+        user_arguments,
+        ai_evidence=ai_evidence,
+        confirmed=confirmed,
+    )
     _bootstrap_run(run)
     diagnostic_outputs = _write_diagnostic_artifacts(run, Path(run.package.package_root), Path(run.target.target_root))
     team_plan_outputs = _write_team_plan(run)
@@ -1328,8 +1977,16 @@ def run_audit(
     target_root: Path,
     user_arguments: str,
     ai_evidence: str = "",
+    confirmed: bool = False,
 ) -> dict[str, Any]:
-    run = _build_contexts(package_root, target_root, "audit", user_arguments, ai_evidence=ai_evidence)
+    run = _build_contexts(
+        package_root,
+        target_root,
+        "audit",
+        user_arguments,
+        ai_evidence=ai_evidence,
+        confirmed=confirmed,
+    )
     _bootstrap_run(run)
 
     target_root_path = Path(run.target.target_root)
@@ -1456,8 +2113,16 @@ def run_preflight(
     target_root: Path,
     user_arguments: str,
     ai_evidence: str = "",
+    confirmed: bool = False,
 ) -> dict[str, Any]:
-    run = _build_contexts(package_root, target_root, "preflight", user_arguments, ai_evidence=ai_evidence)
+    run = _build_contexts(
+        package_root,
+        target_root,
+        "preflight",
+        user_arguments,
+        ai_evidence=ai_evidence,
+        confirmed=confirmed,
+    )
     _bootstrap_run(run)
 
     target_root_path = Path(run.target.target_root)
@@ -1564,8 +2229,16 @@ def run_ship(
     target_root: Path,
     user_arguments: str,
     ai_evidence: str = "",
+    confirmed: bool = False,
 ) -> dict[str, Any]:
-    run = _build_contexts(package_root, target_root, "ship", user_arguments, ai_evidence=ai_evidence)
+    run = _build_contexts(
+        package_root,
+        target_root,
+        "ship",
+        user_arguments,
+        ai_evidence=ai_evidence,
+        confirmed=confirmed,
+    )
     _bootstrap_run(run)
 
     target_root_path = Path(run.target.target_root)
@@ -1677,8 +2350,16 @@ def run_orchestrate(
     target_root: Path,
     user_arguments: str,
     ai_evidence: str = "",
+    confirmed: bool = False,
 ) -> dict[str, Any]:
-    run = _build_contexts(package_root, target_root, "orchestrate", user_arguments, ai_evidence=ai_evidence)
+    run = _build_contexts(
+        package_root,
+        target_root,
+        "orchestrate",
+        user_arguments,
+        ai_evidence=ai_evidence,
+        confirmed=confirmed,
+    )
     _bootstrap_run(run)
     run_root = Path(run.run_root)
     target_root_path = Path(run.target.target_root)
@@ -1779,6 +2460,10 @@ def run_intent(
     target_root: Path,
     user_arguments: str,
     ai_evidence: str = "",
+    confirmed: bool = False,
+    source_spec: str = "",
+    source_draft: str = "",
+    allow_template_fallback: bool = False,
 ) -> dict[str, Any]:
     handlers = {
         "develop": run_develop,
@@ -1793,4 +2478,21 @@ def run_intent(
     }
     if intent not in handlers:
         raise ValueError(f"Unsupported intent: {intent}")
-    return handlers[intent](package_root, target_root, user_arguments, ai_evidence=ai_evidence)
+    if intent in {"develop", "hotfix", "iterate", "evolve"}:
+        return handlers[intent](
+            package_root,
+            target_root,
+            user_arguments,
+            ai_evidence=ai_evidence,
+            confirmed=confirmed,
+            source_spec=source_spec,
+            source_draft=source_draft,
+            allow_template_fallback=allow_template_fallback,
+        )
+    return handlers[intent](
+        package_root,
+        target_root,
+        user_arguments,
+        ai_evidence=ai_evidence,
+        confirmed=confirmed,
+    )

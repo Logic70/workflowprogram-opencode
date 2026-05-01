@@ -150,6 +150,42 @@ def validate_target_bundle(target_root: Path) -> dict[str, Any]:
             "namespace_conflict",
         )
     )
+    declared_command_files = {
+        str(command.get("file", "")).replace("\\", "/")
+        for command in commands
+        if str(command.get("file", "")).strip()
+    }
+    actual_command_files = {
+        path.relative_to(resolved).as_posix()
+        for path in (resolved / ".opencode" / "commands").glob("*.md")
+        if path.is_file()
+    }
+    declared_plugin_files = {
+        str(plugin.get("file", "")).replace("\\", "/")
+        for plugin in plugins
+        if str(plugin.get("file", "")).strip()
+    }
+    actual_plugin_files = {
+        path.relative_to(resolved).as_posix()
+        for path in (resolved / ".opencode" / "plugins").glob("*.ts")
+        if path.is_file()
+    }
+    undeclared_opencode_assets = sorted(
+        (actual_command_files - declared_command_files)
+        | (actual_plugin_files - declared_plugin_files)
+    )
+    missing_declared_opencode_assets = sorted(
+        (declared_command_files - actual_command_files)
+        | (declared_plugin_files - actual_plugin_files)
+    )
+    checks.append(
+        _check(
+            "TGT-10",
+            not undeclared_opencode_assets and not missing_declared_opencode_assets,
+            f"undeclared={undeclared_opencode_assets} missing_declared={missing_declared_opencode_assets}",
+            "bundle_policy",
+        )
+    )
 
     generated_runtime = (
         spec.get("generated_runtime_contract", {})

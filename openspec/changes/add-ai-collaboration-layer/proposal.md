@@ -1,5 +1,10 @@
 ## Why
 
+Status note: this change is superseded for workflow-design semantics by
+`align-opencode-design-flow-with-claude`. Its host-dispatch assets remain useful,
+but `--ai-evidence` is now legacy diagnostic evidence and not a core acceptance
+signal.
+
 The OpenCode package had a deterministic Python control plane, but the design did not explicitly place OpenCode model/agent collaboration in the workflow execution path. This made `/wp-develop` look like a Python-only generator and left stage guidance as passive evidence instead of actionable agent dispatch.
 
 The required correction is not to copy ClaudeCode skills. OpenCode should use OpenCode-native package agents as the AI collaboration layer while keeping Python responsible for deterministic state, validation, managed apply, and rollback.

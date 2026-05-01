@@ -36,7 +36,7 @@
 
 - [x] 5.1 Update package/run-state validators so `context.ai_evidence` and `state.ai_collaboration` are not required for PASS.
 - [x] 5.2 Reuse or port the ClaudeCode draft validator for `workflow-spec.md`.
-- [x] 5.3 Require clarification package files when the develop path claims S1 is complete.
+- [x] 5.3 Require clarification package files when the develop path claims clarification/readback is complete.
 - [x] 5.4 Validate that `workflow-view.md` and `workflow-lowlevel.md` are deterministic derivations of `workflow-spec.yaml`.
 - [x] 5.5 Validate that persistent `TARGET_ROOT/.workflowprogram/design/workflow-spec.yaml` matches the accepted `RUN_ROOT/workflow-spec.yaml` for the develop run.
 - [x] 5.6 Validate that target runtime assets match `workflow-spec.yaml`.
@@ -70,14 +70,20 @@
 - [x] 8.7 Document residual gaps if any ClaudeCode behavior is still not matched.
 
 Residual verification note:
-- Full `smoke-harness.py` was attempted locally after switching it to `sys.executable`, but timed out after 244 seconds in this environment. Focused runtime, spec, draft, run-state, and target-bundle validations passed.
+- Full `smoke-harness.py` was attempted locally after switching it to `sys.executable`, but still timed out after 364 seconds in this environment. Focused runtime, spec, draft, run-state, target-bundle, package-contract, and OpenSpec validations passed.
 
 ## 9. Graph Workflow Migration
 
-- [ ] 9.1 Replace fixed `S1-S6` stage slots in the workflow spec model with AI-defined stage nodes and transitions.
-- [ ] 9.2 Define reusable capability templates or subgraphs for common behaviors such as clarification, validation, self-iteration, merge, and handoff.
-- [ ] 9.3 Add an explicit `context_contract` section that describes shared inputs, outputs, authoritative sources, and derived data without access-control policy.
-- [ ] 9.4 Update workflow generation so templates are optional inputs selected by AI, not mandatory stage slots.
-- [ ] 9.5 Update validators so graph structure, transitions, and template expansion are validated without depending on fixed slot names.
-- [ ] 9.6 Update `workflow-view.md` and `workflow-lowlevel.md` generation to render the graph-shaped spec and the selected capability templates.
-- [ ] 9.7 Add a deferred OpenSpec task for context access-control policy design, covering stage-based, agent-based, and hybrid options.
+- [x] 9.1 Replace fixed `S1-S6` stage slots in the workflow spec model with AI-defined stage nodes and transitions.
+- [x] 9.2 Define reusable capability templates or subgraphs for common behaviors such as clarification, validation, self-iteration, merge, and handoff.
+- [x] 9.3 Add an explicit `context_contract` section that describes shared inputs, outputs, authoritative sources, and derived data without access-control policy.
+- [x] 9.4 Update workflow generation so templates are optional inputs selected by AI, not mandatory stage slots.
+- [x] 9.5 Update validators so graph structure, transitions, and template expansion are validated without depending on fixed slot names.
+- [x] 9.6 Update `workflow-view.md` and `workflow-lowlevel.md` generation to render the graph-shaped spec and the selected capability templates.
+- [x] 9.7 Add a deferred OpenSpec task for context access-control policy design, covering stage-based, agent-based, and hybrid options.
+
+## 10. Deferred Context Access Policy
+
+- [ ] 10.1 Compare stage-based, agent-based, and hybrid context read/write policy options.
+- [ ] 10.2 Define enforcement semantics only after a concrete conflict or security boundary requires them.
+- [ ] 10.3 Update validators and generated runtime only after the selected policy is accepted.

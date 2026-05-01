@@ -8,7 +8,7 @@ Deep validation SHALL prioritize existing WorkflowProgram artifact relationships
 
 - **WHEN** a completed develop run is validated
 - **THEN** validators SHALL check `workflow-spec.md` draft quality when present
-- **AND** validators SHALL check clarification package and handoff evidence when S1 is complete
+- **AND** validators SHALL check clarification package and handoff evidence when clarification/readback is complete
 - **AND** validators SHALL check `workflow-spec.yaml`
 - **AND** validators SHALL check deterministic derivation of `workflow-view.md` and `workflow-lowlevel.md`
 - **AND** validators SHALL check generated runtime and managed apply evidence
@@ -32,4 +32,3 @@ OpenCode SHALL NOT introduce a new core validation domain solely for AI design p
 - **WHEN** validation needs to reason about AI or agent participation
 - **THEN** the check SHALL attach to draft design, clarification evidence, spec validation, or run-state evidence
 - **AND** validation SHALL NOT introduce `AI-DESIGN-*` as a separate product concept
-

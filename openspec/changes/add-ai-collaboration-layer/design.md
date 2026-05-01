@@ -1,5 +1,10 @@
 ## Context
 
+Supersession note: `align-opencode-design-flow-with-claude` keeps the useful
+host-dispatch assets from this change but replaces the core design contract.
+Normal mutation now consumes an accepted `workflow-spec.yaml`; `--ai-evidence`
+is legacy diagnostic context only.
+
 WorkflowProgram for OpenCode has three separate execution responsibilities:
 
 - OpenCode host and package agents provide AI reasoning and review.
@@ -16,16 +21,20 @@ Package commands SHALL use OpenCode package agents as the AI collaboration layer
 
 The command flow SHALL be:
 
-1. Run `agent-team-planner.py` for the product intent.
-2. Dispatch `recommended_dispatch` entries with `timing=pre-runtime` before `workflow-entry.py`.
-3. Pass a concise summary of useful pre-runtime agent findings to `workflow-entry.py --ai-evidence`.
-4. Run deterministic runtime.
-5. Dispatch `timing=post-runtime` entries after `RUN_ROOT` exists.
-6. Report skipped dispatch as `AI-DISPATCH-SKIPPED`; never claim an agent ran without a separate response or trace.
+1. Run an interactive clarification gate for develop requests that have not been explicitly confirmed by the user.
+2. Ask blocking questions and stop until the user answers and confirms the design readback.
+3. Run `agent-team-planner.py` for the product intent.
+4. Dispatch `recommended_dispatch` entries with `timing=pre-runtime` before `workflow-entry.py`.
+5. Pass a concise summary of useful pre-runtime agent findings to `workflow-entry.py --ai-evidence`.
+6. Run deterministic runtime with `--confirmed`.
+7. Dispatch `timing=post-runtime` entries after `RUN_ROOT` exists.
+8. Report skipped dispatch as `AI-DISPATCH-SKIPPED`; never claim an agent ran without a separate response or trace.
 
 ### Runtime Evidence
 
-`workflow-entry.py --ai-evidence` SHALL record host-mediated AI evidence in run context and state. The runtime treats this as evidence, not as authority to bypass validators.
+`workflow-entry.py --ai-evidence` SHALL record host-mediated AI evidence in run context and state. The runtime treats this as evidence, not as authority to bypass validators or user confirmation.
+
+For `develop`, `workflow-entry.py` SHALL also support `--confirmed`. When the request is not confirmed, runtime SHALL emit blocking clarification questions and SHALL NOT generate target workflow assets. Pre-runtime AI evidence SHALL NOT substitute for `--confirmed`.
 
 ### Boundary Rules
 

@@ -14,7 +14,7 @@ RUNTIME_DIR = Path(__file__).resolve().parents[1]
 if str(RUNTIME_DIR) not in sys.path:
     sys.path.insert(0, str(RUNTIME_DIR))
 
-from runtime_common import FAILURE_KINDS, MUTATING_PACKAGE_INTENTS, SCHEMA_VERSION, STAGE_SLOTS, read_json, read_jsonl  # noqa: E402
+from runtime_common import FAILURE_KINDS, MUTATING_PACKAGE_INTENTS, SCHEMA_VERSION, read_json, read_jsonl, sha256_file  # noqa: E402
 from error_codes import code_for, remediation_for  # noqa: E402
 
 
@@ -64,8 +64,10 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
     diagnostics_content_ok = False
     clarification_ok = True
     clarification_content_ok = True
-    team_plan_ok = False
-    ai_collaboration_ok = False
+    team_plan_ok = True
+    ai_collaboration_ok = True
+    run_design_artifacts_ok = True
+    target_design_match_ok = True
     apply_recovery_ok = True
     schema_version_ok = True
     if context_path.is_file() and state_path.is_file() and events_path.is_file():
@@ -83,11 +85,12 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
             and bool(events)
         )
         ai_collaboration = state.get("ai_collaboration")
-        ai_collaboration_ok = (
-            isinstance(context.get("ai_evidence"), str)
-            and isinstance(ai_collaboration, dict)
-            and isinstance(ai_collaboration.get("evidence_supplied"), bool)
-        )
+        if ai_collaboration is not None:
+            ai_collaboration_ok = (
+                isinstance(ai_collaboration, dict)
+                and isinstance(ai_collaboration.get("evidence_supplied"), bool)
+                and ai_collaboration.get("success_gate") is False
+            )
         current_progress = progress_root / "current-progress.json"
         milestones = progress_root / "milestones.jsonl"
         user_progress = progress_root / "user-progress.md"
@@ -122,6 +125,9 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
                 "clarification_record": clarification_root / "clarification-record.json",
                 "open_questions": clarification_root / "open-questions.json",
                 "design_readiness_report": clarification_root / "design-readiness-report.json",
+                "clarification_challenge_report": clarification_root / "clarification-challenge-report.json",
+                "clarification_handoff": clarification_root / "clarification-handoff.json",
+                "clarification_evidence": clarification_root / "clarification-evidence.json",
                 "assumption_log": clarification_root / "assumption-log.md",
             }
             clarification_ok = all(path.is_file() for path in clarification_files.values())
@@ -129,13 +135,19 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
                 clarification_record = read_json(clarification_files["clarification_record"])
                 open_questions = read_json(clarification_files["open_questions"])
                 design_readiness = read_json(clarification_files["design_readiness_report"])
+                challenge_report = read_json(clarification_files["clarification_challenge_report"])
+                handoff = read_json(clarification_files["clarification_handoff"])
+                evidence = read_json(clarification_files["clarification_evidence"])
                 assumption_log = clarification_files["assumption_log"].read_text(encoding="utf-8").strip()
                 clarification_content_ok = all(
                     (
                         clarification_record.get("intent") == "develop",
                         isinstance(open_questions.get("blocking"), list),
                         isinstance(open_questions.get("non_blocking"), list),
-                        design_readiness.get("ready") is True,
+                        isinstance(design_readiness.get("ready"), bool),
+                        isinstance(challenge_report.get("challenge_rounds"), int),
+                        isinstance(handoff.get("s3_inputs"), dict),
+                        evidence.get("legacy_ai_evidence_success_gate") is False,
                         assumption_log.startswith("# Assumption Log"),
                     )
                 )
@@ -159,6 +171,26 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
                     and isinstance(managed_result.get("lock"), dict)
                     and isinstance(rollback_path, str)
                     and Path(rollback_path).is_file()
+                )
+                target_root = Path(str(context.get("target", {}).get("target_root", "")))
+                run_design_files = [
+                    resolved / "workflow-spec.yaml",
+                    resolved / "workflow-view.md",
+                    resolved / "workflow-lowlevel.md",
+                ]
+                target_design_files = [
+                    target_root / ".workflowprogram" / "design" / "workflow-spec.yaml",
+                    target_root / ".workflowprogram" / "design" / "workflow-view.md",
+                    target_root / ".workflowprogram" / "design" / "workflow-lowlevel.md",
+                ]
+                run_design_artifacts_ok = all(path.is_file() for path in run_design_files)
+                target_design_match_ok = (
+                    run_design_artifacts_ok
+                    and all(path.is_file() for path in target_design_files)
+                    and all(
+                        sha256_file(run_file) == sha256_file(target_file)
+                        for run_file, target_file in zip(run_design_files, target_design_files)
+                    )
                 )
 
     checks.append(_check("RUN-05", verdict_ok, "state.verdict must be valid", "state_invalid"))
@@ -207,7 +239,7 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
         _check(
             "RUN-12",
             clarification_content_ok,
-            "develop clarification package must include record, question lists, readiness report, and assumption log",
+            "develop clarification package must include record, questions, challenge report, handoff, evidence, readiness, and assumptions",
             "evidence_inconsistent",
         )
     )
@@ -215,7 +247,7 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
         _check(
             "AGT-02",
             team_plan_ok,
-            f"team_plan={team_plan_path}",
+            f"optional_team_plan={team_plan_path}",
             "orchestration",
         )
     )
@@ -223,8 +255,24 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
         _check(
             "AGT-03",
             ai_collaboration_ok,
-            "context.ai_evidence and state.ai_collaboration must record host-mediated agent evidence state",
+            "legacy ai evidence is optional and must not be a success gate when present",
             "orchestration",
+        )
+    )
+    checks.append(
+        _check(
+            "RUN-13",
+            run_design_artifacts_ok,
+            "mutating run must retain workflow-spec.yaml, workflow-view.md, and workflow-lowlevel.md in RUN_ROOT after managed apply",
+            "evidence_missing",
+        )
+    )
+    checks.append(
+        _check(
+            "RUN-14",
+            target_design_match_ok,
+            "target design artifacts must match the accepted RUN_ROOT design artifacts",
+            "bundle_mismatch",
         )
     )
     checks.append(

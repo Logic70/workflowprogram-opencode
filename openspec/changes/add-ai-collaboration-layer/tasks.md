@@ -17,9 +17,12 @@
 - [x] 3.3 Record AI evidence in `context.json` and `state.json`.
 - [x] 3.4 Update mutation commands to run planner and dispatch pre-runtime agents before runtime.
 - [x] 3.5 Update review/readiness commands to dispatch post-runtime agents after deterministic evidence exists.
+- [x] 3.6 Add interactive clarification gate and `--confirmed` for develop.
+- [x] 3.7 Block unconfirmed develop requests before target bundle generation.
 
 ## 4. Verification
 
 - [x] 4.1 Run Python compile checks for runtime changes.
 - [x] 4.2 Run package contract validator.
 - [x] 4.3 Run deterministic smoke harness.
+- [x] 4.4 Verify unconfirmed `/wp-develop` returns clarification-only `WARN` without target spec generation.

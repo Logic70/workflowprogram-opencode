@@ -7,7 +7,7 @@ The correction is to align OpenCode with the existing WorkflowProgram artifact m
 ## What Changes
 
 - Make `/wp-develop` follow the ClaudeCode design flow:
-  - produce `workflow-spec.md` during S1 design and clarification
+  - produce `workflow-spec.md` during clarification and design readback
   - produce `workflow-spec.yaml` as the single machine-readable source
   - generate `workflow-view.md` and `workflow-lowlevel.md` from `workflow-spec.yaml`
   - generate target runtime assets from `workflow-spec.yaml`
@@ -46,4 +46,3 @@ Updates are expected in:
 - `package/.workflowprogram/runtime/*workflow-view*`
 - `package/.workflowprogram/runtime/*workflow-lowlevel*`
 - `tests/` fixtures and smoke coverage
-

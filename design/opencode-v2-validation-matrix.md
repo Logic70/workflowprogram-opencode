@@ -112,13 +112,14 @@
 |---|---|---|---|---|
 | INT-01 | intent contract 完整 | commands、runtime intent、handler、spec flow | 不允许存在 command/runtime/spec flow 悬空项 | intent_contract |
 | AGT-01 | package agent role schema 合法 | `.opencode/agents/*.md` | 必需 role 元数据存在且取值合法 | agent_contract |
-| AGT-02 | team plan 可解析 | `RUN_ROOT/outputs/team-plan.json` | 阶段、角色、输入、输出、fan-in 策略完整 | orchestration |
-| AGT-03 | AI 协作证据可追踪 | `context.json`、`state.json`、command transcript | 若命令调度了 package agent，必须记录独立 agent 输出或 `--ai-evidence` 摘要；未调度时必须报告 skip | orchestration |
+| AGT-02 | team plan 可解析 | `RUN_ROOT/outputs/team-plan.json` | 若存在则阶段、角色、输入、输出、fan-in 策略完整；不存在不阻断 core PASS | orchestration |
+| AGT-03 | legacy AI evidence 不作为成功门禁 | `context.json`、`state.json` | `--ai-evidence` 若存在只能作为 legacy 诊断字段，不能替代 `workflow-spec.md`、clarification handoff 或 accepted `workflow-spec.yaml` | orchestration |
 | HOST-01 | host source inventory 存在 | doctor diagnostics | 必须列出 project/global/known external asset sources | host_isolation |
 | HOST-02 | namespace shadowing 检测 | commands/agents/skills/plugins | 同名或覆盖风险必须报告来源路径 | namespace_shadowing |
 | REL-01 | release manifest 合法 | `dist/opencode/manifest.json` | 文件清单、checksum、excluded patterns 必须完整 | release_contract |
 | MIG-01 | schema version 存在 | spec/manifest/run-state/install manifest | 版本字段必须存在且兼容 | schema_contract |
 | APP-01 | managed apply lock/rollback 存在 | apply evidence | 变更型 intent 必须具备 lock 与恢复证据 | apply_recovery |
+| TGT-10 | target OpenCode 资产必须由 spec 声明 | `.opencode/commands/*`、`.opencode/plugins/*`、`workflow-spec.yaml` | 未在 `workflow-spec.yaml` registry 中声明的 target command/plugin 不得出现在 generated target bundle | bundle_policy |
 | ERR-01 | error code 合法 | runtime/validator/doctor/smoke reports | 失败必须包含稳定 error code 与 remediation | error_taxonomy |
 | SEC-01 | 证据脱敏 | logs/reports/events | 不得泄露 token/API key/敏感环境变量 | privacy |
 | GBI-01 | bootstrap manifest 合法 | global bootstrap manifest | 必须记录 global root、cache root、cache package root 和命令清单 | bootstrap_contract |

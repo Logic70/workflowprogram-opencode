@@ -115,10 +115,10 @@ graph LR
     C --> P["Package Plugin Bridge"]
     C --> ATP["agent-team-planner.py"]
     ATP --> A["OpenCode package agents"]
-    A --> AE["AI evidence summary"]
+    A --> DS["accepted workflow-spec.md + workflow-spec.yaml"]
     C --> E["workflow-entry.py"]
-    AE -. "--ai-evidence" .-> E
-    E --> S["workflow-spec build"]
+    DS --> E
+    E --> S["workflow-spec validation"]
     S --> B["target bundle generator"]
     B --> M["managed apply"]
     M --> T["TARGET_ROOT"]
@@ -136,7 +136,7 @@ graph LR
 | F2 Package Entry | `/wp-*` 命令分发 | 产品包契约 |
 | F3 Plugin Bridge | 提供 hook/custom tool | 产品包契约 |
 | F4 AI Collaboration | OpenCode package agents 产出设计/评审证据 | AI 协作契约 |
-| F5 Workflow Semantics Build | 生成目标工作流语义 spec | 工作流语义契约 |
+| F5 Workflow Semantics Build | 消费并校验已接受的目标工作流语义 spec | 工作流语义契约 |
 | F6 Target Bundle Delivery | 生成并写入目标 bundle | 目标交付契约 |
 | F7 Evidence & Validation | 运行证据与分层校验 | 运行证据契约 |
 | F8 Global Bootstrap | 全局轻量部署入口 | 安装部署契约 |
@@ -208,7 +208,7 @@ sequenceDiagram
     participant Apply as managed apply
     User->>Cmd: /wp-develop <target_root>
     Cmd->>Entry: run(intent=develop)
-    Entry->>Spec: build workflow-spec.yaml
+    Entry->>Spec: read and validate accepted workflow-spec.yaml
     Entry->>Gen: emit candidate bundle
     Entry->>Apply: plan/apply changes
     Entry-->>User: result summary
@@ -488,8 +488,10 @@ graph TB
 - `agentteam` 由 runtime 生成 `team-plan.json` 与 `team-plan.md`，描述阶段、角色、并行度、输入、输出、调度提示和汇聚策略。
 - subagent 是执行手段，但 v1 runtime 不直接调用 OpenCode subagent；OpenCode host 或用户需要按 `recommended_dispatch` 显式调用 package agent。
 - `team-plan` 是调度指南，不是执行证据；只有独立 agent 响应、dispatch trace 或 fan-in report 才能证明 subagent 已运行。
-- package command 先运行 `agent-team-planner.py`，按 `pre-runtime` 调度设计类 agent，再运行 `workflow-entry.py`；runtime 结束后按 `post-runtime` 调度验证/审计类 agent。
-- pre-runtime agent 结论以简短摘要通过 `workflow-entry.py --ai-evidence` 进入 `context.json` 和 `state.json`，用于回放与审计。
+- package command 可以运行 `agent-team-planner.py`，按 `pre-runtime` 调度设计类 agent，再运行 `workflow-entry.py`；planner 与 team-plan 是调度建议，不是 mutation 成功条件。
+- `develop` 的默认入口先执行交互式澄清门：未确认请求必须先问 blocking questions、做设计回读并要求用户确认；确认后 runtime 使用 `--confirmed --draft <workflow-spec.md> --spec <workflow-spec.yaml>` 消费 accepted spec 并执行生成。`--ai-evidence` 只保留为 legacy 诊断字段，不能绕过确认门禁或替代 accepted spec。
+- 若模型跳过交互直接调用 runtime，runtime 也必须返回 clarification-only `WARN`，不得生成 target bundle。
+- pre-runtime agent 结论如果改变设计，必须体现在 accepted `workflow-spec.yaml` 中；`--ai-evidence` 不作为后续验收或生成输入。
 - `workflow-designer` 负责设计，`workflow-validator` 负责契约校验，`workflow-verifier` 负责证据闭环，reviewer 负责专项审查，`test-scenario-generator` 负责场景覆盖。
 
 #### 推荐 agent frontmatter

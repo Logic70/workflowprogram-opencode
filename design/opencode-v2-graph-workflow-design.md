@@ -38,10 +38,14 @@ Recommended top-level sections:
 - `nodes`
 - `transitions`
 - `templates`
+- `intent_routes`
 - `context_contract`
+- `registry`
 - `outputs`
 - `runtime_contract`
 - `generated_runtime_contract`
+
+`test_contract` may be present as derived verification guidance, but workflow semantics still come from the graph, routes, templates, and context contract.
 
 ## Context Semantics
 

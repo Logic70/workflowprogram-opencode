@@ -10,23 +10,23 @@ Rules:
 - Pass `$ARGUMENTS` to the runtime as raw iterate intent.
 - Iterate requires an existing generated target workflow.
 - Existing generated target workflow means `.workflowprogram/design/workflow-spec.yaml`, not `.workflowprogram/package/*`, `.workflowprogram/runtime/*`, or `.workflowprogram/runs/*` alone.
-- Use package agents as the AI collaboration layer before deterministic runtime mutation.
+- Use the host model/package agents to produce the accepted updated `workflow-spec.yaml`; Python validates and applies it.
 
-Run the agentteam planner first:
+Optionally run the agentteam planner first:
 
 ```bash
 "${WORKFLOWPROGRAM_PYTHON}" "${WORKFLOWPROGRAM_RUNTIME_ROOT}/agent-team-planner.py" --package-root "${WORKFLOWPROGRAM_PACKAGE_ROOT}" --intent iterate --json
 ```
 
-Then dispatch `pre-runtime` agents if listed, or report `AI-DISPATCH-SKIPPED` if unavailable.
+Then dispatch `pre-runtime` agents if useful, or report `AI-DISPATCH-SKIPPED` if unavailable. Planner output and skipped dispatch are advisory only.
 
-Run the runtime after pre-runtime agent dispatch:
+Run the runtime after the updated design is accepted:
 
 ```bash
-"${WORKFLOWPROGRAM_PYTHON}" "${WORKFLOWPROGRAM_RUNTIME_ROOT}/workflow-entry.py" iterate --package-root "${WORKFLOWPROGRAM_PACKAGE_ROOT}" --target-root "$PWD" --user-arguments "$ARGUMENTS"
+"${WORKFLOWPROGRAM_PYTHON}" "${WORKFLOWPROGRAM_RUNTIME_ROOT}/workflow-entry.py" iterate --package-root "${WORKFLOWPROGRAM_PACKAGE_ROOT}" --target-root "$PWD" --user-arguments "$ARGUMENTS" --draft "<path-to-workflow-spec.md>" --spec "<path-to-workflow-spec.yaml>"
 ```
 
-If concise AI evidence exists, append `--ai-evidence "<summary>"` to the runtime command.
+Do not use `--ai-evidence` as proof that design happened; it is a deprecated diagnostic note only.
 
 Then:
 - Report the created `RUN_ROOT`.

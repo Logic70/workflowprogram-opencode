@@ -28,7 +28,7 @@ from error_codes import code_for, remediation_for
 HOST_COMMAND_SPECS = (
     {
         "name": "wp-develop",
-        "request": "host integration smoke --emit-target-command --emit-target-plugin",
+        "request": "host integration smoke --emit-target-command --emit-target-plugin --confirmed",
         "markers": ("workflow-entry.py", " develop "),
     },
     {

@@ -16,7 +16,6 @@ from typing import Any
 import yaml
 
 
-STAGE_SLOTS = ("S1", "S2", "S3", "S4", "S5", "S6")
 FAILURE_KINDS = ("none", "design", "implementation", "environment", "conflict")
 VALID_COMPLEXITY = {"S", "M", "L", "XL"}
 PACKAGE_COMMAND_PREFIX = "wp-"
@@ -314,6 +313,9 @@ def parse_user_arguments(raw: str, target_root_name: str) -> DevelopRequest:
             emit_target_plugin = True
             plugin_id_override = tokens[index + 1]
             index += 2
+            continue
+        if token in {"--confirmed", "--yes"}:
+            index += 1
             continue
         summary_parts.append(token)
         index += 1

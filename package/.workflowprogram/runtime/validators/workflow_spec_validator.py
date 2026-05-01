@@ -23,7 +23,6 @@ from runtime_common import (  # noqa: E402
     PACKAGE_PLUGIN_ID,
     PRODUCT_INTENT_CONTRACT,
     SCHEMA_VERSION,
-    STAGE_SLOTS,
     derive_expected_target_files,
     read_yaml,
     registry_commands,
@@ -34,13 +33,15 @@ from error_codes import code_for, remediation_for  # noqa: E402
 
 REQUIRED_TOP_KEYS = {
     "meta",
-    "stages",
-    "intent_flows",
+    "nodes",
+    "transitions",
+    "templates",
+    "intent_routes",
+    "context_contract",
     "registry",
     "outputs",
     "runtime_contract",
     "generated_runtime_contract",
-    "test_contract",
 }
 REQUIRED_META_KEYS = {"name", "version", "target_platform", "source_design", "complexity"}
 REQUIRED_RUNTIME_KEYS = {"write_boundaries", "required_evidence", "failure_kinds", "environment_skip"}
@@ -109,32 +110,166 @@ def validate_workflow_spec(spec_path: Path) -> dict[str, Any]:
         )
     )
 
-    stage_slots = {
-        str(stage.get("stage_slot", "")).strip()
-        for stage in spec.get("stages", [])
-        if isinstance(stage, dict)
-    }
-    intent_flows = spec.get("intent_flows", {}) if isinstance(spec.get("intent_flows"), dict) else {}
-    supported_spec_flows = {
-        intent for intent, contract in PRODUCT_INTENT_CONTRACT.items() if contract.get("spec_flow")
-    }
-    flow_names_ok = set(intent_flows).issubset(supported_spec_flows)
-    flow_ok = bool(stage_slots) and stage_slots.issubset(set(STAGE_SLOTS)) and flow_names_ok
-    for flow in intent_flows.values():
-        if not isinstance(flow, dict):
-            flow_ok = False
+    nodes = spec.get("nodes", []) if isinstance(spec.get("nodes"), list) else []
+    node_ids = [
+        str(node.get("id", "")).strip()
+        for node in nodes
+        if isinstance(node, dict)
+    ]
+    unique_node_ids = set(node_ids)
+    node_schema_ok = bool(node_ids) and len(node_ids) == len(unique_node_ids)
+    for node in nodes:
+        if not isinstance(node, dict):
+            node_schema_ok = False
             continue
-        required_slots = flow.get("required_stage_slots", [])
-        if not isinstance(required_slots, list):
-            flow_ok = False
-            continue
-        if any(slot not in stage_slots for slot in required_slots):
-            flow_ok = False
+        required_node_keys = {"id", "name", "purpose", "inputs", "outputs", "preconditions", "postconditions"}
+        if not required_node_keys.issubset(set(node.keys())):
+            node_schema_ok = False
+        for list_key in ("inputs", "outputs", "preconditions", "postconditions"):
+            if not isinstance(node.get(list_key), list):
+                node_schema_ok = False
     checks.append(
         _check(
             "SPEC-03",
-            flow_ok,
-            f"stage_slots={sorted(stage_slots)} intent_flows={sorted(intent_flows)} supported={sorted(supported_spec_flows)}",
+            node_schema_ok,
+            f"node_ids={node_ids}",
+            "design",
+        )
+    )
+
+    transitions = spec.get("transitions", []) if isinstance(spec.get("transitions"), list) else []
+    transition_schema_ok = bool(transitions) and bool(unique_node_ids)
+    outgoing: dict[str, set[str]] = {node_id: set() for node_id in unique_node_ids}
+    incoming: dict[str, set[str]] = {node_id: set() for node_id in unique_node_ids}
+    for transition in transitions:
+        if not isinstance(transition, dict):
+            transition_schema_ok = False
+            continue
+        source = str(transition.get("from", "")).strip()
+        target = str(transition.get("to", "")).strip()
+        if source not in unique_node_ids or target not in unique_node_ids:
+            transition_schema_ok = False
+            continue
+        if not str(transition.get("kind", "")).strip():
+            transition_schema_ok = False
+        outgoing[source].add(target)
+        incoming[target].add(source)
+    entry_nodes = sorted(node_id for node_id, sources in incoming.items() if not sources)
+    reachable: set[str] = set()
+    stack = list(entry_nodes)
+    while stack:
+        current = stack.pop()
+        if current in reachable:
+            continue
+        reachable.add(current)
+        stack.extend(sorted(outgoing.get(current, set()) - reachable))
+    transition_graph_ok = transition_schema_ok and bool(entry_nodes) and reachable == unique_node_ids
+    checks.append(
+        _check(
+            "SPEC-11",
+            transition_graph_ok,
+            f"entry_nodes={entry_nodes} reachable={sorted(reachable)} node_ids={sorted(unique_node_ids)}",
+            "design",
+        )
+    )
+
+    templates = spec.get("templates", []) if isinstance(spec.get("templates"), list) else []
+    template_ids = set()
+    template_ok = isinstance(templates, list)
+    for template in templates:
+        if isinstance(template, str):
+            template_ids.add(template)
+            continue
+        if not isinstance(template, dict):
+            template_ok = False
+            continue
+        template_id = str(template.get("id", "")).strip()
+        if not template_id:
+            template_ok = False
+        template_ids.add(template_id)
+        expanded_nodes = template.get("expanded_nodes", [])
+        if expanded_nodes and (
+            not isinstance(expanded_nodes, list)
+            or any(str(node_id) not in unique_node_ids for node_id in expanded_nodes)
+        ):
+            template_ok = False
+    node_template_refs = {
+        str(template_ref)
+        for node in nodes
+        if isinstance(node, dict)
+        for template_ref in (node.get("templates", []) if isinstance(node.get("templates", []), list) else [])
+    }
+    missing_template_refs = sorted(node_template_refs - template_ids)
+    checks.append(
+        _check(
+            "SPEC-12",
+            template_ok and not missing_template_refs,
+            f"templates={sorted(template_ids)} missing_refs={missing_template_refs}",
+            "design",
+        )
+    )
+
+    intent_routes = spec.get("intent_routes", {}) if isinstance(spec.get("intent_routes"), dict) else {}
+    supported_spec_flows = {
+        intent for intent, contract in PRODUCT_INTENT_CONTRACT.items() if contract.get("spec_flow")
+    }
+    route_names_ok = set(intent_routes).issubset(supported_spec_flows)
+    route_ok = bool(intent_routes) and route_names_ok
+    for route in intent_routes.values():
+        if not isinstance(route, dict):
+            route_ok = False
+            continue
+        entry_node = str(route.get("entry_node", "")).strip()
+        terminal_nodes = route.get("terminal_nodes", [])
+        failure_nodes = route.get("failure_nodes", [])
+        path = route.get("path", [])
+        route_nodes = [entry_node]
+        if not entry_node:
+            route_ok = False
+        for values in (terminal_nodes, failure_nodes, path):
+            if not isinstance(values, list):
+                route_ok = False
+                continue
+            route_nodes.extend(str(value).strip() for value in values)
+        if any(node_id and node_id not in unique_node_ids for node_id in route_nodes):
+            route_ok = False
+    checks.append(
+        _check(
+            "SPEC-13",
+            route_ok,
+            f"intent_routes={sorted(intent_routes)} supported={sorted(supported_spec_flows)}",
+            "design",
+        )
+    )
+
+    legacy_fixed_slot_keys = sorted(key for key in ("stages", "intent_flows") if key in spec)
+    legacy_fixed_slot_markers = []
+    serialized = json.dumps(spec, ensure_ascii=True)
+    for marker in ("stage_slot", "required_stage_slots", "optional_stage_slots"):
+        if marker in serialized:
+            legacy_fixed_slot_markers.append(marker)
+    checks.append(
+        _check(
+            "SPEC-14",
+            not legacy_fixed_slot_keys and not legacy_fixed_slot_markers,
+            f"legacy_keys={legacy_fixed_slot_keys} legacy_markers={legacy_fixed_slot_markers}",
+            "design",
+        )
+    )
+
+    context_contract = (
+        spec.get("context_contract", {}) if isinstance(spec.get("context_contract"), dict) else {}
+    )
+    context_required_keys = {"shared_inputs", "shared_outputs", "authoritative_sources", "derived_data"}
+    context_ok = context_required_keys.issubset(set(context_contract.keys()))
+    for key in context_required_keys:
+        if not isinstance(context_contract.get(key), list):
+            context_ok = False
+    checks.append(
+        _check(
+            "SPEC-15",
+            context_ok,
+            f"context_keys={sorted(context_contract.keys())}",
             "design",
         )
     )
@@ -225,7 +360,6 @@ def validate_workflow_spec(spec_path: Path) -> dict[str, Any]:
     )
 
     package_refs = []
-    serialized = json.dumps(spec, ensure_ascii=True)
     for marker in ("WP_PACKAGE_ROOT", PACKAGE_PLUGIN_ID, f".opencode/plugins/{PACKAGE_PLUGIN_FILE}"):
         if marker in serialized:
             package_refs.append(marker)

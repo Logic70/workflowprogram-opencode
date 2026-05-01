@@ -55,7 +55,30 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ai-evidence",
         default="",
-        help="Optional concise evidence summary from host-mediated OpenCode package agents",
+        help=(
+            "Deprecated legacy host evidence note. It is recorded for diagnostics only "
+            "and is not accepted as workflow design proof."
+        ),
+    )
+    parser.add_argument(
+        "--spec",
+        default="",
+        help="Path to the accepted workflow-spec.yaml produced by the design/readback step",
+    )
+    parser.add_argument(
+        "--draft",
+        default="",
+        help="Path to the matching workflow-spec.md design draft/readback; required for develop with --spec",
+    )
+    parser.add_argument(
+        "--allow-template-fallback",
+        action="store_true",
+        help="Allow deterministic template generation for fixtures/smoke tests; normal runs should pass --spec",
+    )
+    parser.add_argument(
+        "--confirmed",
+        action="store_true",
+        help="Confirm that interactive clarification and design readback are complete",
     )
     parser.add_argument(
         "--json",
@@ -76,6 +99,10 @@ def main() -> int:
         target_root=Path(args.target_root),
         user_arguments=args.user_arguments,
         ai_evidence=args.ai_evidence,
+        confirmed=args.confirmed,
+        source_spec=args.spec,
+        source_draft=args.draft,
+        allow_template_fallback=args.allow_template_fallback,
     )
 
     if args.json:
