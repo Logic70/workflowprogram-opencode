@@ -1257,8 +1257,10 @@ def _target_plugin_source(
     hook_intents: list[str],
     hook_events: list[str],
 ) -> str:
-    hook_list = ", ".join(f'"{event}"' for event in hook_events)
-    intent_list = ", ".join(f'"{intent}"' for intent in hook_intents)
+    plugin_id_js = json.dumps(plugin_id, ensure_ascii=True)
+    spec_name_js = json.dumps(spec_name, ensure_ascii=True)
+    hook_list = ", ".join(json.dumps(event, ensure_ascii=True) for event in hook_events)
+    intent_list = ", ".join(json.dumps(intent, ensure_ascii=True) for intent in hook_intents)
     handlers: list[str] = []
     if "event" in hook_events:
         handlers.append(
@@ -1318,8 +1320,8 @@ def _target_plugin_source(
     },'''
         )
     body = "\n".join(handlers) or "    // No hook handlers declared.\n"
-    return f"""const TARGET_PLUGIN_ID = "{plugin_id}"
-const TARGET_WORKFLOW_NAME = "{spec_name}"
+    return f"""const TARGET_PLUGIN_ID = {plugin_id_js}
+const TARGET_WORKFLOW_NAME = {spec_name_js}
 const TARGET_HOOK_EVENTS = [{hook_list}]
 const TARGET_HOOK_INTENTS = [{intent_list}]
 

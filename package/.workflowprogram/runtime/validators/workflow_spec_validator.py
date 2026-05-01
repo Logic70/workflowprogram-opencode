@@ -277,10 +277,14 @@ def validate_workflow_spec(spec_path: Path) -> dict[str, Any]:
         )
     )
 
+    self_iteration_selected = "self-iteration-loop" in template_ids
     self_iteration_template = template_by_id.get("self-iteration-loop")
     self_iteration_ok = True
     self_iteration_detail = "not selected"
-    if self_iteration_template is not None:
+    if self_iteration_selected and self_iteration_template is None:
+        self_iteration_ok = False
+        self_iteration_detail = "self-iteration-loop must be a template object with max_attempts and stop_conditions"
+    elif self_iteration_template is not None:
         max_attempts = self_iteration_template.get("max_attempts")
         stop_conditions = self_iteration_template.get("stop_conditions")
         route_failure_nodes = {
