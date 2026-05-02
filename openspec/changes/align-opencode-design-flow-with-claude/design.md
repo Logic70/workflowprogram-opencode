@@ -1,12 +1,21 @@
 ## Design
 
-OpenCode WorkflowProgram keeps the ClaudeCode artifact model, but the workflow itself is no longer a fixed slot pipeline. The target model is a graph-shaped workflow that AI defines per request inside a fixed spec shape.
+OpenCode WorkflowProgram keeps the ClaudeCode execution split: AI and the user design the workflow; Python validates and applies the accepted design. The workflow itself is no longer a fixed slot pipeline. The target model is a graph-shaped workflow that AI defines per request inside a fixed spec shape.
 
 The corrected mutation flow is:
 
 1. OpenCode command runs the WorkflowProgram design conversation for the requested intent.
-2. The design conversation writes `RUN_ROOT/workflow-spec.md`.
-3. Existing clarification scripts derive and validate:
+2. For broad requests, the command asks a concise clarification set before runtime execution. The questions must cover the workflow graph shape, self-iteration need, CLI trigger need, plugin hook need, and the business context needed to design the workflow.
+3. The command reads back the proposed design before apply:
+   - graph nodes and their purpose
+   - graph edges, ordering, branches, fan-in, and fan-out
+   - shared context objects passed between nodes
+   - enabled capabilities such as self-iteration, validation, CLI command, plugin hook, agent assistance, or handoff
+   - capabilities intentionally not enabled
+   - files that will be written after confirmation
+4. The user must explicitly confirm the readback. A vague continuation such as "continue" is not enough unless the turn clearly confirms writing and runtime execution.
+5. The accepted design writes `RUN_ROOT/workflow-spec.md`.
+6. Existing clarification scripts derive and validate:
    - `outputs/stages/clarification-record.json`
    - `outputs/stages/open-questions.json`
    - `outputs/stages/assumption-log.md`
@@ -14,20 +23,21 @@ The corrected mutation flow is:
    - `outputs/stages/clarification-challenge-report.json`
    - `outputs/stages/clarification-handoff.json`
    - `outputs/stages/clarification-evidence.json`
-4. The command/model produces `RUN_ROOT/workflow-spec.yaml` from the accepted design.
+7. The command/model produces `RUN_ROOT/workflow-spec.yaml` from the accepted design.
    The YAML schema is fixed, but its graph content is AI-shaped:
    - stage nodes are request-specific
    - transitions are request-specific
    - reusable capability templates may be included when the request needs them
-5. Python validates `workflow-spec.yaml`.
-6. Python deterministically generates `workflow-view.md`, `workflow-lowlevel.md`, target runtime assets, and any spec-requested target OpenCode assets.
-7. Python applies the candidate bundle through managed apply.
+8. Python validates `workflow-spec.yaml`.
+9. Python generates target runtime assets and any spec-requested target OpenCode assets.
+10. Python applies the candidate bundle through managed apply.
 
 ## Artifact Rules
 
 - `workflow-spec.md` is the human-readable design draft and clarification carrier.
 - `workflow-spec.yaml` is the only machine-readable source of workflow semantics.
-- `workflow-view.md` and `workflow-lowlevel.md` are generated read-only views from `workflow-spec.yaml`.
+- `workflow-view.md`, `workflow-lowlevel.md`, `workflow-spec.proposed.yaml`, `design-brief.md`, and `ai-design-source.json` are not core design artifacts in this flow.
+- If a diagnostic view is needed later, it must be a non-semantic report derived from `workflow-spec.yaml`, not another source the user or runtime must maintain.
 - `clarification-*.json` and `assumption-log.md` are the evidence chain for readiness, challenge, handoff, and readback confirmation.
 - `--ai-evidence`, `state.ai_collaboration`, and `team-plan` are supplemental evidence only and must not be required to prove that workflow design occurred.
 - Fixed `S1-S6` slots are not part of the target model.
@@ -54,7 +64,6 @@ This change intentionally avoids new intermediate artifacts and new validation d
 - draft design validation
 - clarification evidence validation
 - spec validation
-- view/lowlevel deterministic derivation validation
 - generated runtime validation
 - target bundle validation
 - managed apply validation
@@ -69,3 +78,5 @@ The user-facing experience stays as one command:
 ```
 
 Internal OpenCode command steps may call package agents or scripts, but the user must not need to understand prepare/resume phases, proposed specs, or design-source envelopes.
+
+The confirmation prompt must be concrete: after confirmation the system will write `workflow-spec.md`, write `workflow-spec.yaml`, run Python validation/generation/apply, and create only the target assets declared by the accepted spec.

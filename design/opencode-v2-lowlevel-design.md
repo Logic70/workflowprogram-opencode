@@ -101,7 +101,8 @@
 |---|---|---|---|
 | 纯 plugin 驱动 | 宿主耦合强、交互自然 | 容易把运行控制面塞进插件，难验证 | 不采用 |
 | 纯 prompt/skill 驱动 | 灵活 | 不确定、难追踪、边界弱 | 不采用 |
-| command + runtime 脚本 | 控制清晰、易审计 | 需要维护脚本链 | 采用 |
+| AI/user 设计 + Python 校验/apply | 保留模型设计能力，同时让 Python 只做契约校验、生成与受控写入 | 需要明确确认门禁和 artifact 契约 | 目标采用 |
+| command + runtime 脚本 | 控制清晰、易审计 | 需要维护脚本链 | 作为执行链采用，不负责隐藏生成业务语义 |
 | command + plugin bridge + runtime | 兼顾 hook/tool 与控制面 | 需要明确边界 | v1 采用 |
 | full global install | 新项目零部署 | 命令污染、版本串扰、隔离弱 | 不采用 |
 | global bootstrap + project-local materialization | 新项目只需运行 `/wp-install`，同时保持隔离 | 需要维护 cache 和 bootstrap 版本 | 采用 |
@@ -349,7 +350,7 @@ sequenceDiagram
 | `package_command_router` | `dispatch(intent, args)` | 标准化产品命令上下文 |
 | `package_plugin_bridge` | `register_hooks()` / `register_tools()` | 注册最小 hook/tool |
 | `runtime_context` | `build_context(package_root, target_root)` | 统一根路径与运行上下文 |
-| `workflow_spec_engine` | `build_spec(context)` | 生成目标工作流语义 |
+| `workflow_spec_engine` | `load_and_validate_spec(context)` | 消费并校验已确认的 `workflow-spec.yaml` |
 | `target_bundle_generator` | `emit_candidate(spec, target_root)` | 生成 target candidate bundle |
 | `managed_apply_engine` | `plan_apply(candidate, target_root)` | 受控写入目标项目 |
 | `validation_coordinator` | `run_validations(context)` | 组织四层校验 |
@@ -457,7 +458,7 @@ graph TB
 | GC-07 schema migration | `schema_versions.py`、`migrations/` | migration plan/report |
 | GC-08 managed apply hardening | `managed-assets.py`、`lockfile`、`rollback manifest` | conflict report、rollback/recover report |
 | GC-09 错误码与权限 | `error_codes.py`、`permission_policy.yaml`、plugin/runtime adapters | typed failure code、remediation |
-| GC-10 深度 validator | `validate-workflow-draft.py`、`validate-workflow-lowlevel.py`、`validate-generated-runtime.py`、`validate-lessons-delta.py`、`generate-clarification-review.py` | deep validation summary |
+| GC-10 深度 validator | `validate-workflow-draft.py`、`validate-generated-runtime.py`、`validate-lessons-delta.py`、`generate-clarification-review.py` | deep validation summary |
 | GC-11 安装生命周期 | `package-deploy.py`、`requirements.lock.txt`、installer smoke | upgrade/uninstall/offline/path report |
 | GC-12 能力映射矩阵 | `design/opencode-v2-capability-parity-matrix.md` | parity status and traceability |
 
@@ -490,6 +491,7 @@ graph TB
 - `team-plan` 是调度指南，不是执行证据；只有独立 agent 响应、dispatch trace 或 fan-in report 才能证明 subagent 已运行。
 - package command 可以运行 `agent-team-planner.py`，按 `pre-runtime` 调度设计类 agent，再运行 `workflow-entry.py`；planner 与 team-plan 是调度建议，不是 mutation 成功条件。
 - `develop` 的默认入口先执行交互式澄清门：未确认请求必须先问 blocking questions、做设计回读并要求用户确认；确认后 runtime 使用 `--confirmed --draft <workflow-spec.md> --spec <workflow-spec.yaml>` 消费 accepted spec 并执行生成。`--ai-evidence` 只保留为 legacy 诊断字段，不能绕过确认门禁或替代 accepted spec。
+- 设计回读必须列出 graph nodes、edges、shared context、启用能力、未启用能力以及确认后将写入的文件；CLI command 与 plugin hook 必须分别确认，不能合并成一个触发选项。
 - 若模型跳过交互直接调用 runtime，runtime 也必须返回 clarification-only `WARN`，不得生成 target bundle。
 - pre-runtime agent 结论如果改变设计，必须体现在 accepted `workflow-spec.yaml` 中；`--ai-evidence` 不作为后续验收或生成输入。
 - `workflow-designer` 负责设计，`workflow-validator` 负责契约校验，`workflow-verifier` 负责证据闭环，reviewer 负责专项审查，`test-scenario-generator` 负责场景覆盖。

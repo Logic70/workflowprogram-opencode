@@ -10,8 +10,8 @@ Deep validation SHALL prioritize existing WorkflowProgram artifact relationships
 - **THEN** validators SHALL check `workflow-spec.md` draft quality when present
 - **AND** validators SHALL check clarification package and handoff evidence when clarification/readback is complete
 - **AND** validators SHALL check `workflow-spec.yaml`
-- **AND** validators SHALL check deterministic derivation of `workflow-view.md` and `workflow-lowlevel.md`
 - **AND** validators SHALL check generated runtime and managed apply evidence
+- **AND** validators SHALL NOT require `workflow-view.md` or `workflow-lowlevel.md` for core success
 
 ### Requirement: Host Smoke Is Visibility Evidence
 

@@ -147,9 +147,9 @@ python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py status --
 
 package agents 是 WorkflowProgram 随包安装到 `.opencode/agents/*.md` 的 OpenCode 角色定义。它们用于设计、校验、验证和专项评审，可以被 WorkflowProgram 的编排逻辑引用，也可以由用户按 OpenCode 的方式显式 `@` 调用。它们不是 agentteam 本身；agentteam 是运行时生成的团队计划和阶段职责，package agent 是其中可被调用的单个执行角色。
 
-`/wp-develop`、`/wp-evolve`、`/wp-hotfix`、`/wp-iterate` 的正常路径是 OpenCode host/model 先完成设计回读，形成 `workflow-spec.md` 和已接受的 `workflow-spec.yaml`；Python runtime 只负责读取该 spec、生成派生视图和 target bundle、执行 managed apply 与验证。agentteam planner 只是可选调度建议，不是成功条件。
+`/wp-develop`、`/wp-evolve`、`/wp-hotfix`、`/wp-iterate` 的正常路径是 OpenCode host/model 先完成设计回读，形成 `workflow-spec.md` 和已接受的 `workflow-spec.yaml`；Python runtime 只负责读取该 spec、生成 target bundle、执行 managed apply 与验证。agentteam planner 只是可选调度建议，不是成功条件。
 
-`/wp-develop` 默认是对话式入口。OpenCode 应先询问目标对象、交付物、工具边界、阶段和目标命令/plugin 等问题，并在你确认设计回读后才执行 runtime 生成目标工作流；未确认时 runtime 只会返回阻塞问题，不会写入目标 `.workflowprogram/design/workflow-spec.yaml`。package agent 证据只能辅助设计，不能替代用户确认。
+`/wp-develop` 默认是对话式入口。OpenCode 应先询问目标对象、交付物、工具边界、graph 形态、自迭代、目标 CLI command 和 OpenCode plugin hook 等问题，并在你确认设计回读后才执行 runtime 生成目标工作流；未确认时 runtime 只会返回阻塞问题，不会写入目标 `.workflowprogram/design/workflow-spec.yaml`。package agent 证据只能辅助设计，不能替代用户确认。
 
 运行时会在 `RUN_ROOT/outputs/team-plan.json` 和 `RUN_ROOT/outputs/team-plan.md` 生成 agentteam 调度建议。这个文件只是调度指南，不代表 subagent 已经执行；只有 OpenCode 实际调用 `@workflow-designer` 等 agent 并留下响应或调度记录后，才能认为该 agent 参与了运行。`--ai-evidence` 仅保留为 legacy 诊断字段，不能作为设计已发生或可写入目标的验收证据。
 
@@ -297,7 +297,7 @@ python3 tools/build_package.py --source-package-root package --output-root dist/
 这个仓库保留了 WorkflowProgram 的核心思路：
 
 - `spec-first`
-- `S0..S6`
+- AI/user graph design + Python validation/apply
 - `RUN_ROOT`
 - managed apply
 - runner / layered validation

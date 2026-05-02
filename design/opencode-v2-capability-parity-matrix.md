@@ -30,7 +30,7 @@
 | Runtime 主链 | workflow-entry / workflow-runner | 已实现 | Python runtime under package root | 已完成 |
 | 运行状态总线 | `state-bus.py`、`stage-progress.py` | 部分实现 | 当前有 run evidence；后续补统一状态总线和进度工具 | `opencode-validation-depth` |
 | 澄清包 | clarification package/review | 已实现 | 已有澄清资产并补充 clarification review generator | `opencode-validation-depth` |
-| 深度校验 | draft/lowlevel/runtime/lessons validators | 已实现 | 增加 deep validators；默认作为独立校验入口，不阻塞基础 `/wp-validate` | `opencode-validation-depth` |
+| 深度校验 | draft/runtime/lessons validators | 已实现 | 增加 deep validators；不把 generated design view 当作核心语义来源 | `opencode-validation-depth` |
 | Host doctor | doctor/probe/remediation | 已实现 | 补齐 host isolation、版本兼容、reload 诊断 | `opencode-host-isolation-and-compatibility` |
 | Host bootstrap | apply-host-bootstrap | 替代实现 | OpenCode 不默认改全局配置；提供诊断和显式 remediation | `opencode-host-isolation-and-compatibility` |
 | Package smoke | verify plugin load | 已实现 | package host integration smoke | 已完成 |

@@ -377,7 +377,10 @@ def _write_clarification_package(
             "divergent_options": "Explore viable workflow shapes and optional capabilities before selecting one.",
             "hard_constraints": "Identify tools, boundaries, side effects, privacy, and allowed writes.",
             "convergence_criteria": "Choose validation signals, stopping conditions, and tradeoffs.",
-            "readback_confirmation": "Confirm the selected graph, deliverables, target command/plugin, and hook needs.",
+            "self_iteration": "Decide whether retry, reflection, rework, maximum attempts, and human handoff belong in the graph.",
+            "target_cli_command": "Decide whether the target workflow should expose a CLI command.",
+            "target_plugin_hook": "Decide separately whether the target workflow should expose an OpenCode plugin hook and which hook events it needs.",
+            "readback_confirmation": "Confirm nodes, edges, shared context, enabled capabilities, disabled capabilities, and files to write.",
         },
         "summary": (
             "Interactive clarification is required before generating the target workflow."
@@ -424,6 +427,14 @@ def _write_clarification_package(
     evidence = {
         "intent": run.intent,
         "readback_confirmed": run.confirmed,
+        "readback_required_items": [
+            "nodes",
+            "edges",
+            "shared_context",
+            "enabled_capabilities",
+            "disabled_capabilities",
+            "files_to_write",
+        ],
         "clarification_rounds": 0 if run.confirmed else 1,
         "challenge_rounds": challenge_report["challenge_rounds"],
         "blocking_open_questions": len(blocking_questions),
@@ -500,12 +511,11 @@ def _argument_confirms(user_arguments: str) -> bool:
 def _interactive_clarification_questions(request: DevelopRequest) -> list[str]:
     summary = request.summary.strip() or "the requested workflow"
     return [
-        f"For `{summary}`, what are 2-3 plausible workflow shapes to consider, and which one should be preferred?",
         "What exact target object and final deliverables should the workflow operate on and produce?",
+        f"For `{summary}`, what graph shape should be considered: sequence, branch, parallelism, fan-in/fan-out, manual checkpoints, and shared context?",
         "What hard constraints apply: allowed tools, write boundaries, external side effects, privacy, or execution limits?",
-        "What validation signals, retry limits, stop conditions, and human handoff conditions should determine success?",
-        "Which graph nodes, branch/fan-in points, optional self-iteration, and confirmation points should be present?",
-        "Should the target workflow expose an OpenCode command or plugin hook? If yes, what names and hook events?",
+        "What validation signals, stop conditions, human handoff, and optional self-iteration retry/rework rules should determine success?",
+        "Which trigger surfaces are needed? Answer separately for target CLI command needs and OpenCode plugin hook needs, including names, hook events, and supported stage or intent.",
     ]
 
 def _load_runtime_module(script_name: str, module_name: str):
@@ -855,6 +865,7 @@ def _build_workflow_spec(
                 {"key": "latest_prior_run", "source": "target .workflowprogram/runs when available"},
             ],
             "shared_outputs": [
+                {"key": "workflow_spec_md", "path": "workflow-spec.md"},
                 {"key": "workflow_spec_yaml", "path": "workflow-spec.yaml"},
                 {"key": "candidate_bundle", "path": "outputs/candidate"},
                 {"key": "validation_summary", "path": "validation-summary.json"},
@@ -863,10 +874,7 @@ def _build_workflow_spec(
                 {"key": "accepted_workflow_spec", "path": "workflow-spec.yaml"},
                 {"key": "managed_apply_result", "path": "outputs/managed-change-result.json"},
             ],
-            "derived_data": [
-                {"key": "workflow_view", "path": "workflow-view.md", "derived_from": "accepted_workflow_spec"},
-                {"key": "workflow_lowlevel", "path": "workflow-lowlevel.md", "derived_from": "accepted_workflow_spec"},
-            ],
+            "derived_data": [],
         },
         "registry": {
             "commands": registry_commands,
@@ -885,9 +893,8 @@ def _build_workflow_spec(
                     "events.jsonl",
                     "validation-summary.json",
                     "validation-summary.md",
+                    "workflow-spec.md",
                     "workflow-spec.yaml",
-                    "workflow-view.md",
-                    "workflow-lowlevel.md",
                     "outputs/**",
                 ],
                 "deny": ["**/.git/**", "**/node_modules/**"],
@@ -1088,7 +1095,7 @@ def _materialize_accepted_design(
     source_spec_path: Path,
     source_draft_path: Path | None,
     intent: str,
-) -> tuple[dict[str, Any], Path, Path, Path, Path]:
+) -> tuple[dict[str, Any], Path, Path]:
     if not source_spec_path.is_file():
         raise FileNotFoundError(f"Accepted workflow spec not found: {source_spec_path}")
     spec = read_yaml(source_spec_path)
@@ -1103,17 +1110,13 @@ def _materialize_accepted_design(
     run_root = Path(run.run_root)
     spec_path = run_root / "workflow-spec.yaml"
     draft_path = run_root / "workflow-spec.md"
-    view_path = run_root / "workflow-view.md"
-    lowlevel_path = run_root / "workflow-lowlevel.md"
 
     write_yaml(spec_path, spec)
     if source_draft_path and source_draft_path.is_file():
         write_text(draft_path, source_draft_path.read_text(encoding="utf-8"))
     else:
         write_text(draft_path, _draft_markdown_from_spec(spec, request, source_spec_path))
-    write_text(view_path, _build_view_markdown(spec, request))
-    write_text(lowlevel_path, _build_lowlevel_markdown(spec, request))
-    return spec, spec_path, draft_path, view_path, lowlevel_path
+    return spec, spec_path, draft_path
 
 
 def _materialize_template_fallback_design(
@@ -1121,15 +1124,13 @@ def _materialize_template_fallback_design(
     request: DevelopRequest,
     clarification_package: dict[str, Any] | None,
     intent: str,
-) -> tuple[dict[str, Any], Path, Path, Path, Path]:
+) -> tuple[dict[str, Any], Path, Path]:
     spec = _build_workflow_spec(run, request, clarification_package)
     spec["meta"]["source_intent"] = intent
     spec["meta"]["source_design_mode"] = "template_fallback"
     run_root = Path(run.run_root)
     spec_path = run_root / "workflow-spec.yaml"
     draft_path = run_root / "workflow-spec.md"
-    view_path = run_root / "workflow-view.md"
-    lowlevel_path = run_root / "workflow-lowlevel.md"
     write_yaml(spec_path, spec)
     write_text(
         draft_path,
@@ -1146,9 +1147,7 @@ def _materialize_template_fallback_design(
             ]
         ),
     )
-    write_text(view_path, _build_view_markdown(spec, request))
-    write_text(lowlevel_path, _build_lowlevel_markdown(spec, request))
-    return spec, spec_path, draft_path, view_path, lowlevel_path
+    return spec, spec_path, draft_path
 
 
 def _target_runtime_entry(spec_name: str) -> str:
@@ -1345,7 +1344,7 @@ def _runtime_manifest(spec: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _build_candidate_bundle(run: RunContext, spec: dict[str, Any], view_text: str, lowlevel_text: str) -> Path:
+def _build_candidate_bundle(run: RunContext, spec: dict[str, Any], draft_text: str) -> Path:
     run_root = Path(run.run_root)
     candidate_root = run_root / "outputs" / "candidate"
     design_root = candidate_root / ".workflowprogram" / "design"
@@ -1353,9 +1352,8 @@ def _build_candidate_bundle(run: RunContext, spec: dict[str, Any], view_text: st
     ensure_dir(design_root)
     ensure_dir(runtime_root)
 
+    write_text(design_root / "workflow-spec.md", draft_text)
     write_yaml(design_root / "workflow-spec.yaml", spec)
-    write_text(design_root / "workflow-view.md", view_text)
-    write_text(design_root / "workflow-lowlevel.md", lowlevel_text)
 
     spec_name = spec["meta"]["name"]
     write_text(runtime_root / "workflow-entry.py", _target_runtime_entry(spec_name))
@@ -1778,7 +1776,7 @@ def _run_mutation_intent(
 
     try:
         if source_spec_path is not None:
-            spec, spec_path, draft_path, view_path, lowlevel_path = _materialize_accepted_design(
+            spec, spec_path, draft_path = _materialize_accepted_design(
                 run,
                 request,
                 source_spec_path,
@@ -1787,7 +1785,7 @@ def _run_mutation_intent(
             )
         else:
             design_source_mode = "template_fallback"
-            spec, spec_path, draft_path, view_path, lowlevel_path = _materialize_template_fallback_design(
+            spec, spec_path, draft_path = _materialize_template_fallback_design(
                 run,
                 request,
                 clarification_package,
@@ -1823,8 +1821,6 @@ def _run_mutation_intent(
         outputs={
             "spec_path": str(spec_path),
             "draft_path": str(draft_path),
-            "view_path": str(view_path),
-            "lowlevel_path": str(lowlevel_path),
             "design_source_mode": design_source_mode,
             "source_spec": str(source_spec_path) if source_spec_path else None,
             "source_draft": str(source_draft_path) if source_draft_path else None,
@@ -1854,8 +1850,7 @@ def _run_mutation_intent(
     candidate_root = _build_candidate_bundle(
         run,
         spec,
-        view_path.read_text(encoding="utf-8"),
-        lowlevel_path.read_text(encoding="utf-8"),
+        draft_path.read_text(encoding="utf-8"),
     )
     plan, apply_result = apply_staged(
         target_root=Path(run.target.target_root),

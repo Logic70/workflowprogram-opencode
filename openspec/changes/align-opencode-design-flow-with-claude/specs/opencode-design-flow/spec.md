@@ -12,15 +12,38 @@ WorkflowProgram OpenCode SHALL let AI define the workflow graph for a request, w
 - **AND** the workflow graph SHALL be expressed as AI-defined stage nodes and transitions within the allowed spec shape
 - **AND** Python SHALL validate and execute from the accepted spec rather than generating workflow semantics from a hidden fixed-stage template
 
+### Requirement: Interactive Clarification Gate
+
+`/wp-develop` SHALL clarify broad requests before runtime execution.
+
+#### Scenario: broad develop request is received
+
+- **WHEN** the user invokes `/wp-develop` with a broad workflow request
+- **THEN** the command SHALL ask clarification questions before running runtime generation
+- **AND** the questions SHALL cover graph shape, self-iteration need, CLI command need, plugin hook need, and enough business context to design the workflow
+- **AND** the first clarification round SHOULD stay concise and defer secondary questions until needed
+
+### Requirement: Graph Design Readback
+
+The command SHALL read back the accepted workflow design before apply.
+
+#### Scenario: clarification answers are available
+
+- **WHEN** the command has enough information to propose a design
+- **THEN** it SHALL summarize nodes, edges, shared context, enabled capabilities, disabled capabilities, and files that will be written
+- **AND** it SHALL ask for explicit confirmation before adding `--confirmed` or running runtime generation/apply
+- **AND** vague continuation SHALL NOT be treated as confirmation unless the user clearly confirms writing artifacts and running runtime
+
 ### Requirement: Single Machine Source
 
 `workflow-spec.yaml` SHALL be the only machine-readable source of workflow semantics.
 
-#### Scenario: generated views are produced
+#### Scenario: generated artifacts are produced
 
-- **WHEN** `workflow-view.md`, `workflow-lowlevel.md`, target runtime files, or target OpenCode assets are generated
+- **WHEN** target runtime files or target OpenCode assets are generated
 - **THEN** they SHALL be derived from `workflow-spec.yaml`
 - **AND** they SHALL NOT introduce semantic fields that are absent from `workflow-spec.yaml`
+- **AND** `workflow-view.md` and `workflow-lowlevel.md` SHALL NOT be required as core design artifacts
 
 ### Requirement: Existing Draft And Clarification Artifacts
 
@@ -30,7 +53,7 @@ OpenCode SHALL reuse the existing draft and clarification evidence chain instead
 
 - **WHEN** validation needs to prove that design and readback occurred
 - **THEN** it SHALL inspect `workflow-spec.md` and the existing `clarification-*` evidence files
-- **AND** it SHALL NOT require `workflow-spec.proposed.yaml`, `design-brief.md`, or `ai-design-source.json`
+- **AND** it SHALL NOT require `workflow-spec.proposed.yaml`, `design-brief.md`, `workflow-view.md`, `workflow-lowlevel.md`, or `ai-design-source.json`
 
 ### Requirement: Template Capabilities Are Optional
 

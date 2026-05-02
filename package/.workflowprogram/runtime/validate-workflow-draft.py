@@ -10,11 +10,13 @@ from pathlib import Path
 
 def validate(target_root: Path) -> dict[str, object]:
     root = target_root.resolve()
-    view = root / ".workflowprogram" / "design" / "workflow-view.md"
+    draft = root / ".workflowprogram" / "design" / "workflow-spec.md"
     spec = root / ".workflowprogram" / "design" / "workflow-spec.yaml"
+    draft_text = draft.read_text(encoding="utf-8") if draft.is_file() else ""
     checks = [
-        {"id": "DRAFT-01", "passed": view.is_file(), "detail": str(view)},
+        {"id": "DRAFT-01", "passed": draft.is_file(), "detail": str(draft)},
         {"id": "DRAFT-02", "passed": spec.is_file(), "detail": str(spec)},
+        {"id": "DRAFT-03", "passed": draft_text.strip().startswith("#"), "detail": "workflow-spec.md must be markdown"},
     ]
     verdict = "PASS" if all(item["passed"] for item in checks) else "FAIL"
     return {"validator": "workflow_draft_validator", "target_root": str(root), "verdict": verdict, "checks": checks, "exit_code": 0 if verdict == "PASS" else 1}
@@ -32,4 +34,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

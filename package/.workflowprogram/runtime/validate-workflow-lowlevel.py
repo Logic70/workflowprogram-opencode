@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate generated workflow lowlevel design assets."""
+"""Legacy optional validator for generated workflow lowlevel design assets."""
 
 from __future__ import annotations
 
@@ -12,6 +12,21 @@ def validate(target_root: Path) -> dict[str, object]:
     root = target_root.resolve()
     lowlevel = root / ".workflowprogram" / "design" / "workflow-lowlevel.md"
     text = lowlevel.read_text(encoding="utf-8") if lowlevel.is_file() else ""
+    if not lowlevel.is_file():
+        return {
+            "validator": "workflow_lowlevel_validator",
+            "target_root": str(root),
+            "verdict": "WARN",
+            "summary": "workflow-lowlevel.md is a legacy optional diagnostic view and is not required for core success",
+            "checks": [
+                {
+                    "id": "LOW-LEGACY-01",
+                    "passed": True,
+                    "detail": "workflow-lowlevel.md absent by design",
+                }
+            ],
+            "exit_code": 0,
+        }
     checks = [
         {"id": "LOW-01", "passed": lowlevel.is_file(), "detail": str(lowlevel)},
         {"id": "LOW-02", "passed": "Runtime Contract" in text, "detail": "Runtime Contract section required"},
@@ -32,4 +47,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

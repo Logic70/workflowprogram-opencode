@@ -11,6 +11,16 @@ OpenCode runtime SHALL consume an accepted `workflow-spec.yaml` for generation, 
 - **AND** generated target design files SHALL include the same accepted spec
 - **AND** managed apply SHALL use the generated candidate bundle
 
+### Requirement: Runtime Does Not Consume Design Views
+
+Runtime SHALL NOT require generated design views as semantic inputs.
+
+#### Scenario: mutation reaches generation
+
+- **WHEN** runtime generates target assets
+- **THEN** it SHALL use `workflow-spec.yaml` as the semantic input
+- **AND** it SHALL NOT require `workflow-view.md`, `workflow-lowlevel.md`, `workflow-spec.proposed.yaml`, `design-brief.md`, or `ai-design-source.json`
+
 ### Requirement: Template Generation Is Not Default
 
 Python template generation SHALL NOT be the default design path for production mutating intents.
@@ -30,6 +40,7 @@ Runtime SHALL derive design readiness and readback confirmation from existing ev
 - **WHEN** managed apply would write target workflow assets
 - **THEN** runtime SHALL require completed readiness/handoff evidence when policy requires clarification/readback completion
 - **AND** a standalone CLI confirmation flag SHALL NOT be the only source of truth
+- **AND** `--confirmed` SHALL only be valid when paired with accepted `workflow-spec.md`, accepted `workflow-spec.yaml`, and readback evidence
 
 ## MODIFIED Requirements
 

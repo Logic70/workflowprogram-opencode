@@ -6,6 +6,8 @@ This document records the target workflow model after removing fixed S1-S6 stage
 
 WorkflowProgram should let AI define the workflow graph for each request, while the framework keeps the spec shape, validation, generation, and managed apply deterministic.
 
+The split is explicit: AI/user design the graph, Python enforces the contract and applies the result.
+
 ## Target Model
 
 The workflow spec should be organized around three layers:
@@ -27,6 +29,8 @@ The workflow spec should be organized around three layers:
    - AI chooses which templates to use
    - AI expands the templates into the request graph
    - AI defines node names, transition conditions, and flow order
+
+`/wp-develop` must read this instance graph back to the user before runtime apply. The readback includes enabled capabilities, disabled capabilities, and the files that will be written.
 
 ## Spec Shape
 
@@ -65,10 +69,12 @@ Validation should focus on:
 - node schema completeness
 - transition validity and reachability
 - template expansion correctness
-- deterministic derivation of `workflow-view.md` and `workflow-lowlevel.md`
 - runtime / target bundle consistency with the accepted graph
+- no dependency on `workflow-view.md` or `workflow-lowlevel.md` as semantic sources
 
 ## Migration Rule
 
 Fixed stage-slot logic is not part of the target design.
 Reusable behaviors may remain as templates, but only as optional inputs selected by AI for the request at hand.
+
+Core design artifacts are limited to `workflow-spec.md` and `workflow-spec.yaml`. `workflow-view.md`, `workflow-lowlevel.md`, `workflow-spec.proposed.yaml`, `design-brief.md`, and `ai-design-source.json` are not part of the target model.

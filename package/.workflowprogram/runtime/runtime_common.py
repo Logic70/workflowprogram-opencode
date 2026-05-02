@@ -105,9 +105,8 @@ REQUIRED_PACKAGE_AGENTS = (
 )
 INSTALL_MANIFEST_PATH = ".workflowprogram/package/install-manifest.json"
 MANDATORY_DESIGN_FILES = (
+    ".workflowprogram/design/workflow-spec.md",
     ".workflowprogram/design/workflow-spec.yaml",
-    ".workflowprogram/design/workflow-view.md",
-    ".workflowprogram/design/workflow-lowlevel.md",
 )
 MANDATORY_RUNTIME_FILES = (
     ".workflowprogram/runtime/workflow-entry.py",

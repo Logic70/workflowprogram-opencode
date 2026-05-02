@@ -8,6 +8,7 @@ This plan implements the graph-shaped workflow model described in `opencode-v2-g
 - Allow AI to define request-specific stage nodes and transitions.
 - Treat clarification, validation, self-iteration, merge, and handoff as optional capability templates or subgraphs.
 - Define `context_contract` as business semantics only.
+- Keep `workflow-spec.md` and `workflow-spec.yaml` as the only core design artifacts.
 - Defer access-control policy to a later OpenSpec task.
 
 ## Implementation Steps
@@ -24,21 +25,25 @@ This plan implements the graph-shaped workflow model described in `opencode-v2-g
    - `outputs`
    - `runtime_contract`
    - `generated_runtime_contract`
-3. Update the runtime generator so it can emit graph-shaped specs and derive views from them.
-4. Update validation so it checks graph completeness, transition reachability, template expansion, and output derivation.
-5. Update command docs so `/wp-develop` describes AI graph design instead of fixed-slot stage completion.
-6. Update the user-facing docs and design index to point at the graph workflow model.
+3. Update `/wp-develop` so broad requests run clarification before runtime execution.
+4. Update the design readback so it shows nodes, edges, shared context, enabled capabilities, disabled capabilities, and files to write.
+5. Update the runtime generator so it consumes accepted `workflow-spec.yaml` and emits only target assets declared by the spec.
+6. Update validation so it checks graph completeness, transition reachability, template expansion, context references, capability declarations, and generated target assets.
+7. Update command docs so `/wp-develop` describes AI graph design instead of fixed-slot stage completion.
+8. Update the user-facing docs and design index to point at the graph workflow model.
 
 ## Decision Rules
 
 - Fixed stage slots are not part of the target design.
 - Templates are optional and request-driven.
 - Context semantics are part of the design; access control is not.
+- `workflow-view.md` and `workflow-lowlevel.md` are not required design artifacts.
 - Existing fixed-slot code paths should be treated as transitional implementation details until removed.
 
 ## Validation Exit Criteria
 
 - A request can produce a valid AI-shaped graph spec without any S1-S6 requirement.
-- `workflow-view.md` and `workflow-lowlevel.md` are deterministic derivations of the accepted graph spec.
+- `/wp-develop` blocks runtime apply until the user explicitly confirms the graph readback.
+- Self-iteration and plugin hook behavior appear only when AI includes them in the accepted graph/spec.
 - Runtime and target bundle generation succeed from the graph-shaped spec.
 - The validation stack no longer depends on fixed stage-slot names for the target path.

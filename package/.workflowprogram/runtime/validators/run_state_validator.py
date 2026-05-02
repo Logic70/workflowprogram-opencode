@@ -147,6 +147,17 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
                         isinstance(design_readiness.get("ready"), bool),
                         isinstance(challenge_report.get("challenge_rounds"), int),
                         isinstance(handoff.get("s3_inputs"), dict),
+                        not managed_result_path.is_file() or evidence.get("readback_confirmed") is True,
+                        not managed_result_path.is_file()
+                        or set(evidence.get("readback_required_items", []))
+                        >= {
+                            "nodes",
+                            "edges",
+                            "shared_context",
+                            "enabled_capabilities",
+                            "disabled_capabilities",
+                            "files_to_write",
+                        },
                         evidence.get("legacy_ai_evidence_success_gate") is False,
                         assumption_log.startswith("# Assumption Log"),
                     )
@@ -174,14 +185,12 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
                 )
                 target_root = Path(str(context.get("target", {}).get("target_root", "")))
                 run_design_files = [
+                    resolved / "workflow-spec.md",
                     resolved / "workflow-spec.yaml",
-                    resolved / "workflow-view.md",
-                    resolved / "workflow-lowlevel.md",
                 ]
                 target_design_files = [
+                    target_root / ".workflowprogram" / "design" / "workflow-spec.md",
                     target_root / ".workflowprogram" / "design" / "workflow-spec.yaml",
-                    target_root / ".workflowprogram" / "design" / "workflow-view.md",
-                    target_root / ".workflowprogram" / "design" / "workflow-lowlevel.md",
                 ]
                 run_design_artifacts_ok = all(path.is_file() for path in run_design_files)
                 target_design_match_ok = (
@@ -263,7 +272,7 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
         _check(
             "RUN-13",
             run_design_artifacts_ok,
-            "mutating run must retain workflow-spec.yaml, workflow-view.md, and workflow-lowlevel.md in RUN_ROOT after managed apply",
+            "mutating run must retain workflow-spec.md and workflow-spec.yaml in RUN_ROOT after managed apply",
             "evidence_missing",
         )
     )

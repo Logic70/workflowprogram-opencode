@@ -15,6 +15,7 @@
 - [opencode-v2-capability-parity-matrix.md](opencode-v2-capability-parity-matrix.md)
 - [claudecode-to-opencode-adaptation.html](claudecode-to-opencode-adaptation.html)
 - [../openspec/changes/complete-opencode-parity-gap-closure](../openspec/changes/complete-opencode-parity-gap-closure)
+- [../openspec/changes/align-opencode-design-flow-with-claude](../openspec/changes/align-opencode-design-flow-with-claude)
 - [../openspec/changes/add-global-bootstrap-installer](../openspec/changes/add-global-bootstrap-installer)
 - [../openspec/changes/add-ai-collaboration-layer](../openspec/changes/add-ai-collaboration-layer)
 
@@ -29,8 +30,9 @@
 | `opencode-v2-capability-parity-matrix.md` | 追踪 ClaudeCode 能力到 OpenCode-native 能力的映射状态 |
 | `claudecode-to-opencode-adaptation.html` | 以 HTML 方式总结 ClaudeCode 到 OpenCode 适配的关注点、难点和解决方案 |
 | `../openspec/changes/complete-opencode-parity-gap-closure` | 定义本轮对齐 ClaudeCode 能力差距的 spec 分解、设计决策和实施任务 |
+| `../openspec/changes/align-opencode-design-flow-with-claude` | 定义 AI/user 设计 graph、Python 校验/apply、确认门禁和核心 artifact 关系 |
 | `../openspec/changes/add-global-bootstrap-installer` | 定义全局轻量 bootstrap、用户级 cache 和项目本地安装体验优化 |
-| `../openspec/changes/add-ai-collaboration-layer` | 定义 OpenCode package agents 与 Python runtime 的 AI 协作分层 |
+| `../openspec/changes/add-ai-collaboration-layer` | 历史变更；host-dispatch 资产可保留，但语义上被 `align-opencode-design-flow-with-claude` 取代 |
 
 ## 当前设计结论
 

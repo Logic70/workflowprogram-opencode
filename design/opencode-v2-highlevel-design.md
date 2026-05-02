@@ -574,6 +574,7 @@ The current target direction is graph-shaped workflow design, not a fixed S1-S6 
 - The framework keeps the spec shape, validation, generation, and managed apply mechanics.
 - Reusable behaviors such as clarification, validation, self-iteration, merge, and handoff may be expressed as optional capability templates or subgraphs.
 - Shared context semantics are part of the workflow design itself.
+- Core design artifacts are `workflow-spec.md` and `workflow-spec.yaml`; generated design views are not required semantic artifacts.
 - Read/write permissions are intentionally deferred to a later task and are not part of this change.
 
 This means the following should be treated as transitional implementation details rather than target design facts:

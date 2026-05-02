@@ -14,10 +14,16 @@ Rules:
 - Default mode is interactive. If the user has not already answered clarification questions and confirmed the design readback, ask the questions first and stop; do not run the runtime yet.
 
 Interactive clarification gate:
-- For broad requests like "create a reverse engineering workflow", use a brainstorm -> constrain -> converge -> readback flow. Ask about plausible workflow shapes, target object, expected deliverables, allowed tools/boundaries, validation signals, retry/stop conditions, graph nodes/transitions or branch points, and target command/plugin hook needs.
-- After the user answers, summarize the proposed workflow graph and ask for explicit confirmation.
-- Only after confirmation, write the accepted design as `workflow-spec.md` and `workflow-spec.yaml`, then continue below and append `--confirmed` to the runtime command.
-- If `$ARGUMENTS` already contains `--confirmed` or the user explicitly confirms in this turn, continue below.
+- For broad requests like "create a reverse engineering workflow", use a brainstorm -> constrain -> converge -> readback flow.
+- Keep the first clarification round concise; group these decisions into at most five questions when possible:
+  - target object and final deliverables
+  - graph shape: sequence, branch, parallelism, fan-in/fan-out, manual checkpoints, and shared context
+  - allowed tools, write boundaries, external side effects, privacy, and execution limits
+  - validation signals, stop conditions, human handoff, and optional self-iteration retry/rework rules
+  - target CLI command needs and, as a separate trigger decision, OpenCode plugin hook needs
+- After the user answers, summarize the proposed workflow graph before runtime execution. The readback must include nodes, edges, shared context, enabled capabilities, disabled capabilities, and files that will be written.
+- Only after explicit confirmation, write the accepted design as `workflow-spec.md` and `workflow-spec.yaml`, then continue below and append `--confirmed` to the runtime command.
+- `$ARGUMENTS` containing `--confirmed` is not enough by itself; it is valid only when the accepted `workflow-spec.md` and `workflow-spec.yaml` also exist and the current turn clearly confirms writing and runtime execution.
 - Pre-runtime package agent evidence helps design the workflow, but it is not a substitute for user confirmation.
 
 Optionally run the agentteam planner after the interactive gate:
@@ -37,7 +43,7 @@ Run the runtime after the accepted design exists:
 "${WORKFLOWPROGRAM_PYTHON}" "${WORKFLOWPROGRAM_RUNTIME_ROOT}/workflow-entry.py" develop --package-root "${WORKFLOWPROGRAM_PACKAGE_ROOT}" --target-root "$PWD" --user-arguments "$ARGUMENTS" --confirmed --draft "<path-to-workflow-spec.md>" --spec "<path-to-workflow-spec.yaml>"
 ```
 
-Only run this command after the interactive gate is complete and `workflow-spec.yaml` is the accepted machine-readable design.
+Only run this command after the interactive gate is complete, `workflow-spec.md` is the accepted human-readable design, and `workflow-spec.yaml` is the accepted machine-readable design.
 Do not run the runtime without `--confirmed` unless you are intentionally testing the runtime guard.
 Do not use `--ai-evidence` as proof that design happened; it is a deprecated diagnostic note only.
 
