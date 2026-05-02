@@ -44,11 +44,13 @@
 - [x] 6.3 Add a fixture where self-iteration is requested and appears as graph nodes/edges, not as a mandatory fixed slot.
 - [x] 6.4 Add a negative fixture where runtime is called without accepted spec/confirmation and must not apply target assets.
 - [x] 6.5 Add a negative fixture where `--ai-evidence` exists without accepted design artifacts and must not pass.
-- [ ] 6.6 Run focused validators and a host smoke that reports host visibility separately from workflow semantic success.
+- [x] 6.6 Run focused validators and a host smoke that reports host visibility separately from workflow semantic success.
 
-Residual verification note:
+Verification note:
 - Focused runtime regressions passed locally via `python tests/test_design_flow_runtime.py`.
-- `target-host-smoke.py` was attempted with a generated target workflow and `--timeout-seconds 5`, but the OpenCode host process did not return before the outer 184 second command timeout. The spawned smoke processes were stopped manually.
+- Runtime host timeout cleanup passed via `python tests/test_runtime_host_timeout.py`; timeout now terminates spawned child processes that keep stdio pipes open.
+- Package install conflict regression passed via `python tests/test_package_deploy_install.py`; an existing package-managed venv is not treated as an unmanaged conflict.
+- `target-host-smoke.py` was rerun with a generated target workflow and `--timeout-seconds 2`. It returned in 5.8s with target spec/command discovery `PASS`, plugin discovery `WARN` because the test spec did not request a plugin, and host execution `ENVIRONMENT-SKIP` because OpenCode invocation timed out. No lingering `opencode` process remained.
 
 ## 7. Deferred Context Access Policy
 

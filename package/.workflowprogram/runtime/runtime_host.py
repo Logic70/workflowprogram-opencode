@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import shlex
 import shutil
 import subprocess
@@ -67,6 +68,98 @@ def _coerce_text(value: Any) -> str:
     return str(value)
 
 
+def _terminate_process_tree(proc: subprocess.Popen[str]) -> None:
+    if proc.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        return
+
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    except Exception:
+        proc.terminate()
+
+
+def _kill_process_tree(proc: subprocess.Popen[str]) -> None:
+    if proc.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        return
+
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    except Exception:
+        proc.kill()
+
+
+def _run_with_timeout(
+    command: list[str],
+    cwd: str,
+    env: dict[str, str],
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    timeout = max(timeout_seconds, 1)
+    popen_kwargs: dict[str, Any] = {
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "text": True,
+        "cwd": cwd or None,
+        "env": env,
+    }
+    if os.name == "nt":
+        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        popen_kwargs["start_new_session"] = True
+
+    proc = subprocess.Popen(command, **popen_kwargs)
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+        return {
+            "returncode": proc.returncode,
+            "stdout": stdout,
+            "stderr": stderr,
+            "timed_out": False,
+        }
+    except subprocess.TimeoutExpired as exc:
+        _terminate_process_tree(proc)
+        stdout = _coerce_text(exc.stdout)
+        stderr = _coerce_text(exc.stderr)
+        try:
+            more_stdout, more_stderr = proc.communicate(timeout=2)
+            stdout += _coerce_text(more_stdout)
+            stderr += _coerce_text(more_stderr)
+        except subprocess.TimeoutExpired:
+            _kill_process_tree(proc)
+            try:
+                more_stdout, more_stderr = proc.communicate(timeout=2)
+                stdout += _coerce_text(more_stdout)
+                stderr += _coerce_text(more_stderr)
+            except subprocess.TimeoutExpired:
+                pass
+        return {
+            "returncode": 124,
+            "stdout": stdout,
+            "stderr": stderr,
+            "timed_out": True,
+        }
+
+
 def invoke_runtime_host(
     provider: str,
     request: str,
@@ -97,15 +190,29 @@ def invoke_runtime_host(
     env.update(extra_env or {})
     if provider == "command_adapter":
         command = shlex.split(provider_command) + [request]
-        proc = subprocess.run(command, capture_output=True, text=True, cwd=cwd or None, env=env)
+        proc = _run_with_timeout(command, cwd=cwd, env=env, timeout_seconds=timeout_seconds)
+        stdout = proc["stdout"]
+        stderr = proc["stderr"]
+        if proc["timed_out"]:
+            return {
+                "provider": provider,
+                "verdict": "ENVIRONMENT-SKIP",
+                "message": f"Command adapter invocation timed out after {timeout_seconds}s",
+                "command": command,
+                "stdout": redact_text(stdout),
+                "stderr": redact_text(stderr),
+                "exit_code": 124,
+                "timed_out": True,
+            }
         return {
             "provider": provider,
-            "verdict": "PASS" if proc.returncode == 0 else "FAIL",
-            "message": redact_text(proc.stdout.strip() or proc.stderr.strip() or f"exit_code={proc.returncode}"),
+            "verdict": "PASS" if proc["returncode"] == 0 else "FAIL",
+            "message": redact_text(stdout.strip() or stderr.strip() or f"exit_code={proc['returncode']}"),
             "command": command,
-            "stdout": redact_text(proc.stdout),
-            "stderr": redact_text(proc.stderr),
-            "exit_code": proc.returncode,
+            "stdout": redact_text(stdout),
+            "stderr": redact_text(stderr),
+            "exit_code": proc["returncode"],
+            "timed_out": False,
         }
     command = ["opencode", "run"]
     if command_name:
@@ -117,41 +224,33 @@ def invoke_runtime_host(
         command.extend(["--print-logs", "--log-level", log_level])
     if cwd:
         command.extend(["--dir", cwd])
-    try:
-        proc = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            cwd=cwd or None,
-            env=env,
-            timeout=max(timeout_seconds, 1),
-        )
-        verdict = "PASS" if proc.returncode == 0 else "FAIL"
-        if proc.returncode != 0 and (proc.stdout.strip() or proc.stderr.strip()) == "":
-            verdict = "WARN"
-        return {
-            "provider": provider,
-            "verdict": verdict,
-            "message": redact_text(proc.stdout.strip() or proc.stderr.strip() or f"exit_code={proc.returncode}"),
-            "command": command,
-            "stdout": redact_text(proc.stdout),
-            "stderr": redact_text(proc.stderr),
-            "exit_code": proc.returncode,
-            "timed_out": False,
-        }
-    except subprocess.TimeoutExpired as exc:
-        stdout = redact_text(_coerce_text(exc.stdout))
-        stderr = redact_text(_coerce_text(exc.stderr))
+    proc = _run_with_timeout(command, cwd=cwd, env=env, timeout_seconds=timeout_seconds)
+    if proc["timed_out"]:
         return {
             "provider": provider,
             "verdict": "ENVIRONMENT-SKIP",
             "message": f"OpenCode invocation timed out after {timeout_seconds}s",
             "command": command,
-            "stdout": stdout,
-            "stderr": stderr,
+            "stdout": redact_text(proc["stdout"]),
+            "stderr": redact_text(proc["stderr"]),
             "exit_code": 124,
             "timed_out": True,
         }
+    stdout = proc["stdout"]
+    stderr = proc["stderr"]
+    verdict = "PASS" if proc["returncode"] == 0 else "FAIL"
+    if proc["returncode"] != 0 and (stdout.strip() or stderr.strip()) == "":
+        verdict = "WARN"
+    return {
+        "provider": provider,
+        "verdict": verdict,
+        "message": redact_text(stdout.strip() or stderr.strip() or f"exit_code={proc['returncode']}"),
+        "command": command,
+        "stdout": redact_text(stdout),
+        "stderr": redact_text(stderr),
+        "exit_code": proc["returncode"],
+        "timed_out": False,
+    }
 
 
 def build_parser() -> argparse.ArgumentParser:

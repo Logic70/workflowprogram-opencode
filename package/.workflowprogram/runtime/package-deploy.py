@@ -350,6 +350,9 @@ def _detect_unmanaged_conflicts(plan: dict[str, Any], force: bool, create_venv: 
 
     for relative in all_targets:
         target_path = plan["install_root"] / relative
+        # The package venv is tracked as a managed directory, not as an installed file.
+        if create_venv and target_path == plan["venv_root"] and (target_path / "pyvenv.cfg").is_file():
+            continue
         if target_path.exists() and relative not in managed_files:
             conflicts.append(relative)
     return conflicts

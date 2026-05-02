@@ -12,6 +12,21 @@
 | 不适用 | ClaudeCode 宿主特有能力，不应迁移 |
 | 替代实现 | OpenCode 使用不同机制实现同类目标 |
 
+## OpenCode-native 增强项
+
+这些增强项不改变主链目标：核心体验仍是 AI/user 设计 workflow graph，Python runtime 做契约校验、受控生成和 managed apply。增强集中在 OpenCode 宿主工程化、安装隔离、可审计验证和恢复能力上。
+
+| 增强项 | 相对 ClaudeCode 原版的增量 | 当前落点 |
+|---|---|---|
+| 全局轻量 bootstrap | 新项目只需要全局 `/wp-install` 引导，从用户级版本化 cache 物化完整 project-local package；避免完整全局安装造成命令污染和版本串扰 | `package-deploy.py install-bootstrap`、`bootstrap-runtime.py`、`/wp-install`、`/wp-upgrade` |
+| package/target 严格分层 | WorkflowProgram 产品包命令、agent、plugin 与生成后的目标 workflow command/plugin 分开管理；目标资产必须由 `workflow-spec.yaml` registry 声明 | `.opencode/*`、`.workflowprogram/package/*`、target bundle validator |
+| managed apply 强化 | 写入有 manifest、lock、idempotency、rollback/recover、unmanaged conflict 检测；package venv 作为 managed directory 被安装器识别 | managed apply runtime、install manifest、`package-deploy.py` |
+| 真实 OpenCode host smoke 分层 | package host integration smoke 和 target host reload smoke 分开；host/API 不可用或超时时返回 `ENVIRONMENT-SKIP`，不把宿主问题伪装成语义通过或失败 | `host-integration-smoke.py`、`target-host-smoke.py`、`runtime_host.py` |
+| 宿主隔离诊断 | doctor 显式检查全局 OpenCode 配置、Claude 资产、oh-my-opencode 资产、版本和 reload 风险 | `doctor.py`、host isolation validation |
+| 安装生命周期产品化 | 支持 status、upgrade、uninstall、offline lock、project-local venv、bootstrap status，便于本地项目长期维护 | `package-deploy.py`、`bootstrap-runtime.py`、install/status docs |
+| schema/error/privacy 契约 | spec、manifest、run-state、install manifest 具备 schema version；错误码和隐私脱敏形成跨 validator/runtime 的统一约束 | schema migration、error taxonomy、privacy redaction |
+| AI graph 设计的确定性落地 | stage/intentflow 的结构固定，但节点名称、顺序、分支、fan-in/out、准入准出、可选自迭代和 hook 由 AI/user 在 accepted spec 中定义 | `workflow-spec.md`、`workflow-spec.yaml`、graph validator |
+
 ## 能力映射
 
 | 能力域 | ClaudeCode 版能力 | OpenCode 版状态 | OpenCode 处理方式 | 对应 spec |

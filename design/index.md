@@ -27,7 +27,7 @@
 | `opencode-v2-lowlevel-design.md` | 定义特性拆分、use case、模块接口、story 依赖与实现约束 |
 | `opencode-v2-validation-matrix.md` | 定义 package/spec/target/run-state/smoke 的分层校验矩阵 |
 | `opencode-v2-implementation-plan.md` | 定义实施阶段、优先级、文件级改造清单与风险收口顺序 |
-| `opencode-v2-capability-parity-matrix.md` | 追踪 ClaudeCode 能力到 OpenCode-native 能力的映射状态 |
+| `opencode-v2-capability-parity-matrix.md` | 追踪 ClaudeCode 能力到 OpenCode-native 能力的映射状态，并记录 OpenCode 版的产品化增强项 |
 | `claudecode-to-opencode-adaptation.html` | 以 HTML 方式总结 ClaudeCode 到 OpenCode 适配的关注点、难点和解决方案 |
 | `../openspec/changes/complete-opencode-parity-gap-closure` | 定义本轮对齐 ClaudeCode 能力差距的 spec 分解、设计决策和实施任务 |
 | `../openspec/changes/align-opencode-design-flow-with-claude` | 定义 AI/user 设计 graph、Python 校验/apply、确认门禁和核心 artifact 关系 |
