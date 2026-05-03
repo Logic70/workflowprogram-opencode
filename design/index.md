@@ -34,6 +34,12 @@
 | `../openspec/changes/add-global-bootstrap-installer` | 定义全局轻量 bootstrap、用户级 cache 和项目本地安装体验优化 |
 | `../openspec/changes/add-ai-collaboration-layer` | 历史变更；host-dispatch 资产可保留，但语义上被 `align-opencode-design-flow-with-claude` 取代 |
 
+## 跨版本输入
+
+| 文档 | 作用 |
+|---|---|
+| `claude-backport-openspec-input.md` | 整理可反哺 ClaudeCode 版的宿主无关能力，作为 Claude 版 OpenSpec change 输入；不包含安装部署和 OpenCode host 细节 |
+
 ## 当前设计结论
 
 - OpenCode v2 是 **OpenCode only** 的产品路径。
