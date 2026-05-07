@@ -19,6 +19,7 @@
 - 优先创建 package 专用 `venv`。
 - 安装完成后必须执行 `status` 校验。
 - 安装或更新插件后，提醒用户重启 OpenCode 或重新打开项目。
+- 安装完成后，`/wp-develop` 会通过 S1 需求逻辑访谈创建目标 workflow；不要把安装流程误认为已经创建了目标 workflow。
 - 如果安装失败，直接报告失败原因，不要假设成功。
 - 除本文档明确要求的命令外，不要额外修改其它文件。
 
@@ -136,6 +137,16 @@ python3 /mnt/d/Code/WorkflowProgram-CN/opencode-v2/package/.workflowprogram/runt
 - 如需使用 package agents，可检查 `@workflow-designer`、`@workflow-validator`、`@workflow-verifier`、`@test-scenario-generator` 等是否可见
 - 如果 OpenCode 仍显示旧命令列表，重启 OpenCode 或重新打开当前项目
 - 如果使用的是全局 bootstrap，新项目第一次只会看到 `/wp-install` 等部署命令；完整 `/wp-develop` 等命令需要项目本地安装后刷新才会出现
+
+## 安装后的 `/wp-develop` 使用约束
+
+`/wp-develop` 是创建或更新目标工作流的对话式入口。OpenCode 应先完成 S1 需求逻辑访谈，再执行 runtime：
+
+- 按 `purpose`、`object_model`、`process_model`、`decision_model`、`evidence_model`、`acceptance_model`、`boundary_model` 七个 logic lenses 澄清需求。
+- 回读 workflow graph、启用/禁用能力、目标 CLI command、OpenCode plugin hook 和将写入的文件。
+- 用户明确确认后，生成 accepted `workflow-spec.md` 和 `workflow-spec.yaml`，再运行 runtime。
+- 成功的 develop run 会留下 `RUN_ROOT/outputs/clarification/question-backlog.json` 和 `RUN_ROOT/outputs/clarification/requirement-logic-map.json`，并镜像到 `RUN_ROOT/outputs/stages/` 供 S5 校验。
+- 如果只问了泛问题或澄清轮次不足，`validate-workflow-draft.py` 会拒绝进入生成阶段。
 
 ## 故障处理
 

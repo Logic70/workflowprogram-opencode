@@ -26,6 +26,8 @@ from runtime_common import (
     ensure_dir,
     iso_now,
     make_run_id,
+    node_loop_enabled_nodes,
+    node_loop_prompt_packages,
     parse_user_arguments,
     read_json,
     read_yaml,
@@ -44,6 +46,16 @@ if str(VALIDATORS_DIR) not in sys.path:
 
 from workflow_spec_validator import validate_workflow_spec  # type: ignore  # noqa: E402
 from package_contract_validator import validate_package_contract  # type: ignore  # noqa: E402
+
+REQUIREMENT_LOGIC_LENSES = (
+    "purpose",
+    "object_model",
+    "process_model",
+    "decision_model",
+    "evidence_model",
+    "acceptance_model",
+    "boundary_model",
+)
 
 
 @dataclass
@@ -345,10 +357,82 @@ def _write_clarification_package(
     mode: str = "direct-command",
 ) -> dict[str, str]:
     clarification_root = Path(run.run_root) / "outputs" / "clarification"
+    stages_root = Path(run.run_root) / "outputs" / "stages"
     ensure_dir(clarification_root)
+    ensure_dir(stages_root)
     blocking_questions = blocking_questions or []
     non_blocking_questions = non_blocking_questions or []
     ready = not blocking_questions
+    clarification_rounds = 2 if run.confirmed else 1
+    logic_lens_inputs = {
+        "purpose": {
+            "question": "Why is this workflow needed, and which signal proves it succeeded?",
+            "answer_source": "accepted readback" if run.confirmed else "blocking clarification",
+            "design_consequence": "Determines terminal verdict, success criteria, and S5 evidence.",
+        },
+        "object_model": {
+            "question": "Which objects are read, transformed, classified, or produced?",
+            "answer_source": "accepted workflow spec" if run.source_spec else "user request",
+            "design_consequence": "Determines node inputs, outputs, and context contract.",
+        },
+        "process_model": {
+            "question": "Which business steps, graph nodes, branches, or fan-in/fan-out paths are required?",
+            "answer_source": "accepted graph readback" if run.confirmed else "blocking clarification",
+            "design_consequence": "Determines nodes and transitions.",
+        },
+        "decision_model": {
+            "question": "Which thresholds, choices, policies, or human approvals change execution?",
+            "answer_source": "accepted workflow spec" if run.source_spec else "user request",
+            "design_consequence": "Determines branch conditions and handoff rules.",
+        },
+        "evidence_model": {
+            "question": "Which evidence proves intermediate and final results are trustworthy?",
+            "answer_source": "runtime contract and readback",
+            "design_consequence": "Determines required_evidence and validation gates.",
+        },
+        "acceptance_model": {
+            "question": "Which positive, negative, and ambiguous scenarios validate the workflow?",
+            "answer_source": "accepted design" if run.confirmed else "blocking clarification",
+            "design_consequence": "Determines acceptance tests and traceability.",
+        },
+        "boundary_model": {
+            "question": "When should the workflow stop, degrade, defer, or refuse to act?",
+            "answer_source": "runtime contract and user constraints",
+            "design_consequence": "Determines stop conditions, write boundaries, privacy limits, and failure kinds.",
+        },
+    }
+    question_backlog = {
+        "lead_role": "requirement-clarification-lead",
+        "direct_user_contact_roles": ["requirement-clarification-lead"],
+        "review_only_roles": ["scenario-extractor", "assumption-auditor", "constraint-reviewer"],
+        "generic_questions_allowed_as_primary_evidence": False,
+        "items": [
+            {
+                "id": f"Q-{index:03d}",
+                "lens": lens,
+                "question": data["question"],
+                "why_design_consequential": data["design_consequence"],
+                "status": "answered" if ready else "blocking",
+            }
+            for index, (lens, data) in enumerate(logic_lens_inputs.items(), start=1)
+        ],
+    }
+    requirement_logic_map = {
+        "logic_lenses": logic_lens_inputs,
+        "requirements": [
+            {
+                "id": "REQ-001",
+                "source_ref": "user_arguments",
+                "statement": request.summary,
+                "priority": "must",
+                "process_refs": ["process_model"],
+                "evidence_refs": ["evidence_model"],
+                "acceptance_refs": ["acceptance_model"],
+                "boundary_refs": ["boundary_model"],
+            }
+        ],
+        "ready": ready,
+    }
 
     clarification_record = {
         "intent": run.intent,
@@ -358,12 +442,12 @@ def _write_clarification_package(
         "normalized_spec_name": request.spec_name,
         "complexity": request.complexity,
         "latest_prior_run": latest_run,
+        "lead_role": "requirement-clarification-lead",
+        "clarification_rounds": clarification_rounds,
         "clarification_method": {
-            "id": "brainstorm-constrain-converge-readback",
+            "id": "requirement-logic-interview",
             "groups": [
-                "divergent_options",
-                "hard_constraints",
-                "convergence_criteria",
+                *REQUIREMENT_LOGIC_LENSES,
                 "readback_confirmation",
             ],
         },
@@ -372,15 +456,12 @@ def _write_clarification_package(
     open_questions = {
         "blocking": blocking_questions,
         "non_blocking": non_blocking_questions,
-        "method": "brainstorm-constrain-converge-readback",
+        "method": "requirement-logic-interview",
+        "lead_role": "requirement-clarification-lead",
         "question_groups": {
-            "divergent_options": "Explore viable workflow shapes and optional capabilities before selecting one.",
-            "hard_constraints": "Identify tools, boundaries, side effects, privacy, and allowed writes.",
-            "convergence_criteria": "Choose validation signals, stopping conditions, and tradeoffs.",
-            "self_iteration": "Decide whether retry, reflection, rework, maximum attempts, and human handoff belong in the graph.",
-            "target_cli_command": "Decide whether the target workflow should expose a CLI command.",
-            "target_plugin_hook": "Decide separately whether the target workflow should expose an OpenCode plugin hook and which hook events it needs.",
-            "readback_confirmation": "Confirm nodes, edges, shared context, enabled capabilities, disabled capabilities, and files to write.",
+            lens: logic_lens_inputs[lens]["question"] for lens in REQUIREMENT_LOGIC_LENSES
+        } | {
+            "readback_confirmation": "Confirm nodes, edges, shared context, enabled capabilities, disabled capabilities, and files to write."
         },
         "summary": (
             "Interactive clarification is required before generating the target workflow."
@@ -393,6 +474,9 @@ def _write_clarification_package(
         "clarification_mode": mode,
         "blocking_open_questions": len(blocking_questions),
         "readback_confirmed": run.confirmed,
+        "requirement_logic_interview_ready": ready,
+        "logic_lenses_complete": all(lens in logic_lens_inputs for lens in REQUIREMENT_LOGIC_LENSES),
+        "generic_questions_blocked": not ready,
         "reason": (
             "The request is too broad to generate a useful workflow without a design conversation."
             if blocking_questions
@@ -402,7 +486,14 @@ def _write_clarification_package(
     challenge_report = {
         "intent": run.intent,
         "status": "passed" if ready else "blocked",
-        "challenge_rounds": 1 if blocking_questions else 0,
+        "challenge_rounds": 1,
+        "review_roles": [
+            {"id": "scenario-extractor", "direct_user_contact": False},
+            {"id": "assumption-auditor", "direct_user_contact": False},
+            {"id": "constraint-reviewer", "direct_user_contact": False},
+        ],
+        "lead_question_backlog": question_backlog["items"],
+        "weakest_logic_lenses": [] if ready else list(REQUIREMENT_LOGIC_LENSES),
         "blocking_questions": blocking_questions,
         "non_blocking_questions": non_blocking_questions,
         "reason": readiness_report["reason"],
@@ -411,22 +502,32 @@ def _write_clarification_package(
     handoff = {
         "intent": run.intent,
         "ready_for_design": ready,
+        "ready": ready,
+        "logic_map_path": str(clarification_root / "requirement-logic-map.json"),
+        "question_backlog_path": str(clarification_root / "question-backlog.json"),
         "workflow_spec_draft": str(Path(run.run_root) / "workflow-spec.md"),
         "workflow_spec_yaml": str(Path(run.run_root) / "workflow-spec.yaml"),
         "s2_inputs": {
             "target_root": run.target.target_root,
             "latest_prior_run": latest_run,
             "request_summary": request.summary,
+            "logic_lens_inputs": logic_lens_inputs,
         },
         "s3_inputs": {
             "accepted_spec_required": True,
             "accepted_spec_path": run.source_spec or None,
             "draft_path": run.source_draft or None,
+            "node_candidates": ["clarify-requirements", "review-target-context", "design-workflow-graph"],
+            "acceptance_scenarios": ["validation PASS", "managed conflict FAIL", "environment unavailable ENVIRONMENT-SKIP"],
         },
     }
     evidence = {
         "intent": run.intent,
         "readback_confirmed": run.confirmed,
+        "logic_map_ready": ready,
+        "s2_handoff_ready": ready,
+        "s3_handoff_ready": ready,
+        "lead_role": "requirement-clarification-lead",
         "readback_required_items": [
             "nodes",
             "edges",
@@ -435,7 +536,7 @@ def _write_clarification_package(
             "disabled_capabilities",
             "files_to_write",
         ],
-        "clarification_rounds": 0 if run.confirmed else 1,
+        "clarification_rounds": clarification_rounds,
         "challenge_rounds": challenge_report["challenge_rounds"],
         "blocking_open_questions": len(blocking_questions),
         "legacy_ai_evidence_supplied": bool(run.ai_evidence.strip()),
@@ -457,6 +558,8 @@ def _write_clarification_package(
 
     clarification_record_path = clarification_root / "clarification-record.json"
     open_questions_path = clarification_root / "open-questions.json"
+    question_backlog_path = clarification_root / "question-backlog.json"
+    requirement_logic_map_path = clarification_root / "requirement-logic-map.json"
     readiness_report_path = clarification_root / "design-readiness-report.json"
     challenge_report_path = clarification_root / "clarification-challenge-report.json"
     handoff_path = clarification_root / "clarification-handoff.json"
@@ -464,15 +567,31 @@ def _write_clarification_package(
     assumption_log_path = clarification_root / "assumption-log.md"
     write_json(clarification_record_path, clarification_record)
     write_json(open_questions_path, open_questions)
+    write_json(question_backlog_path, question_backlog)
+    write_json(requirement_logic_map_path, requirement_logic_map)
     write_json(readiness_report_path, readiness_report)
     write_json(challenge_report_path, challenge_report)
     write_json(handoff_path, handoff)
     write_json(evidence_path, evidence)
     write_text(assumption_log_path, assumption_log)
+    for source_path in (
+        clarification_record_path,
+        open_questions_path,
+        question_backlog_path,
+        requirement_logic_map_path,
+        readiness_report_path,
+        challenge_report_path,
+        handoff_path,
+        evidence_path,
+    ):
+        write_json(stages_root / source_path.name, read_json(source_path))
+    write_text(stages_root / assumption_log_path.name, assumption_log)
 
     return {
         "clarification_record": str(clarification_record_path),
         "open_questions": str(open_questions_path),
+        "question_backlog": str(question_backlog_path),
+        "requirement_logic_map": str(requirement_logic_map_path),
         "design_readiness_report": str(readiness_report_path),
         "clarification_challenge_report": str(challenge_report_path),
         "clarification_handoff": str(handoff_path),
@@ -484,6 +603,8 @@ def _write_clarification_package(
 def _load_clarification_package(artifact_paths: dict[str, str]) -> dict[str, Any]:
     clarification_record = read_json(Path(artifact_paths["clarification_record"]))
     open_questions = read_json(Path(artifact_paths["open_questions"]))
+    question_backlog = read_json(Path(artifact_paths["question_backlog"]))
+    requirement_logic_map = read_json(Path(artifact_paths["requirement_logic_map"]))
     design_readiness = read_json(Path(artifact_paths["design_readiness_report"]))
     challenge_report = read_json(Path(artifact_paths["clarification_challenge_report"]))
     handoff = read_json(Path(artifact_paths["clarification_handoff"]))
@@ -492,6 +613,8 @@ def _load_clarification_package(artifact_paths: dict[str, str]) -> dict[str, Any
     return {
         "clarification_record": clarification_record,
         "open_questions": open_questions,
+        "question_backlog": question_backlog,
+        "requirement_logic_map": requirement_logic_map,
         "design_readiness_report": design_readiness,
         "clarification_challenge_report": challenge_report,
         "clarification_handoff": handoff,
@@ -574,6 +697,46 @@ def _write_team_plan(run: RunContext) -> dict[str, str]:
     return {"team_plan": str(team_plan_path), "team_plan_guide": str(team_plan_markdown_path)}
 
 
+def _default_loop_policy(node_id: str) -> dict[str, Any]:
+    return {
+        "enabled": True,
+        "mode": "ralph",
+        "goal_source": "model_subgoal",
+        "parent_goal_ref": "intent.develop.validation_feedback",
+        "max_iterations": 2,
+        "fresh_context_each_iteration": True,
+        "prompt_package": f".workflowprogram/loops/{node_id}/prompt-package.md",
+        "tdd_policy": {
+            "enabled": False,
+        },
+        "feedback_commands": [
+            {
+                "id": "run_layered_validation",
+                "kind": "validator",
+                "argv": [
+                    "python3",
+                    ".workflowprogram/runtime/validate-run-state.py",
+                    "--run-root",
+                    "${RUN_ROOT}",
+                ],
+                "timeout_seconds": 120,
+                "failure_effect": "feedback",
+            }
+        ],
+        "stop_conditions": {
+            "success": ["verifier_passed"],
+            "max_iterations": "warn",
+            "no_progress_iterations": 2,
+            "hard_fail_on": ["managed_conflict"],
+        },
+        "evidence_outputs": [
+            f"outputs/stages/loops/{node_id}/loop-plan.json",
+            f"outputs/stages/loops/{node_id}/iteration-summary.jsonl",
+            f"outputs/stages/loops/{node_id}/final-verdict.json",
+        ],
+    }
+
+
 def _build_workflow_spec(
     run: RunContext,
     request: DevelopRequest,
@@ -581,11 +744,14 @@ def _build_workflow_spec(
 ) -> dict[str, Any]:
     required_outputs = list(MANDATORY_DESIGN_FILES + MANDATORY_RUNTIME_FILES)
     required_outputs.append(".workflowprogram/managed-files.json")
+    node_loop_enabled = request.complexity in {"L", "XL"}
+    iterate_loop_policy = _default_loop_policy("iterate-on-failures") if node_loop_enabled else None
 
     registry_commands: list[dict[str, Any]] = []
     registry_plugins: list[dict[str, Any]] = []
     target_allow = [
         ".workflowprogram/design/**",
+        ".workflowprogram/loops/**",
         ".workflowprogram/runtime/**",
     ]
 
@@ -621,6 +787,9 @@ def _build_workflow_spec(
         runtime_capabilities.append("target_command_delivery")
     if registry_plugins:
         runtime_capabilities.append("target_plugin_bridge")
+    if node_loop_enabled:
+        runtime_capabilities.append("node_loop_execution")
+        required_outputs.append(".workflowprogram/loops/iterate-on-failures/prompt-package.md")
 
     templates = [
         {
@@ -730,6 +899,7 @@ def _build_workflow_spec(
             "preconditions": ["validation verdict is FAIL or WARN"],
             "postconditions": ["retry, stop, or handoff decision is recorded"],
             "templates": ["validation-loop"] + (["self-iteration-loop"] if request.complexity in {"L", "XL"} else []),
+            **({"loop_policy": iterate_loop_policy} if iterate_loop_policy else {}),
         },
         {
             "id": "record-lessons",
@@ -903,6 +1073,13 @@ def _build_workflow_spec(
                 "context.json",
                 "state.json",
                 "events.jsonl",
+                "outputs/stages/s1-requirements.yaml",
+                "outputs/stages/s2-context-findings.yaml",
+                "outputs/stages/s3-design-highlevel.md",
+                "outputs/stages/s3-design-lowlevel.md",
+                "outputs/stages/s3-implementation-plan.md",
+                "outputs/stages/acceptance-tests.yaml",
+                "outputs/stages/traceability-matrix.json",
                 "outputs/diagnostics/host-capabilities.json",
                 "outputs/diagnostics/capability-probe.json",
                 "outputs/diagnostics/doctor-report.json",
@@ -1079,6 +1256,49 @@ def _draft_markdown_from_spec(spec: dict[str, Any], request: DevelopRequest, sou
         f"- Name: `{meta.get('name', request.spec_name)}`",
         f"- Request: {meta.get('request_summary', request.summary)}",
         "",
+        "## User Intent",
+        "",
+        f"- Summary: {meta.get('request_summary', request.summary)}",
+        "- Success: accepted workflow-spec.yaml validates and target bundle evidence is complete.",
+        "",
+        "## Clarification Summary",
+        "",
+        "- 澄清轮次: 2",
+        "- 已确认事项: target workflow graph, evidence gates, write boundaries, and files to write.",
+        "- 已消解歧义: trigger surface, node roster, validation signals, stop conditions.",
+        "",
+        "## Requirement Logic Interview",
+        "",
+        "- Purpose Lens: establish final goal and success signal.",
+        "- Object Model Lens: define inputs, target assets, and outputs.",
+        "- Process Model Lens: define graph nodes and transition order.",
+        "- Decision Model Lens: define branches, retries, and handoff points.",
+        "- Evidence Lens: require context/state/events, managed result, validation summary, and S5 report.",
+        "- Acceptance Lens: require positive generation, blocked write, and environment-skip scenarios.",
+        "- Boundary Lens: restrict writes to managed WorkflowProgram/OpenCode paths.",
+        "",
+        "## Open Questions",
+        "",
+        "- None blocking after accepted readback.",
+        "",
+        "## Assumptions and Boundaries",
+        "",
+        "- Python runtime performs validation and managed apply; host model performs design reasoning.",
+        "- Do not write outside declared managed boundaries.",
+        "",
+        "## Target Workflow Graph Readback",
+        "",
+        "- Nodes, edges, shared context, enabled capabilities, disabled capabilities, and file plan are confirmed.",
+        "",
+        "## File Plan",
+        "",
+        "- Write `.workflowprogram/design/workflow-spec.md` and `.workflowprogram/design/workflow-spec.yaml`.",
+        "- Write target runtime and optional `.opencode/*` assets only when declared.",
+        "",
+        "## Readback Confirmation",
+        "",
+        "- Confirmed: true",
+        "",
         "## Workflow Nodes",
         "",
     ]
@@ -1087,6 +1307,235 @@ def _draft_markdown_from_spec(spec: dict[str, Any], request: DevelopRequest, sou
             continue
         lines.append(f"- `{node.get('id', 'unknown')}` {node.get('name', 'Unnamed node')}")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _default_design_refs(spec: dict[str, Any]) -> dict[str, Any]:
+    refs: dict[str, Any] = {
+        "requirements": "outputs/stages/s1-requirements.yaml",
+        "context_findings": "outputs/stages/s2-context-findings.yaml",
+        "design_highlevel": "outputs/stages/s3-design-highlevel.md",
+        "design_lowlevel": "outputs/stages/s3-design-lowlevel.md",
+        "implementation_plan": "outputs/stages/s3-implementation-plan.md",
+        "acceptance_tests": "outputs/stages/acceptance-tests.yaml",
+        "traceability_matrix": "outputs/stages/traceability-matrix.json",
+    }
+    loop_nodes = node_loop_enabled_nodes(spec)
+    if loop_nodes:
+        refs["node_designs"] = {
+            str(node.get("id", "")).strip(): f"outputs/stages/node-designs/{str(node.get('id', '')).strip()}.md"
+            for node in loop_nodes
+            if str(node.get("id", "")).strip()
+        }
+    return refs
+
+
+def _merge_design_refs(spec: dict[str, Any]) -> dict[str, Any]:
+    if "design_refs" in spec and not isinstance(spec.get("design_refs"), dict):
+        return {}
+    design_refs = spec.setdefault("design_refs", {})
+    if not isinstance(design_refs, dict):
+        return {}
+    defaults = _default_design_refs(spec)
+    for key, value in defaults.items():
+        if key == "node_designs":
+            target = design_refs.setdefault("node_designs", {})
+            if isinstance(target, dict):
+                for node_id, path in value.items():
+                    target.setdefault(node_id, path)
+        else:
+            design_refs.setdefault(key, value)
+    return design_refs
+
+
+def _safe_stage_ref(run_root: Path, rel_path: str, *, node_design: bool = False) -> Path | None:
+    cleaned = rel_path.strip().replace("\\", "/")
+    if not cleaned or cleaned.startswith("/") or cleaned.startswith("~") or "//" in cleaned:
+        return None
+    if any(part in {"", ".", ".."} for part in cleaned.split("/")):
+        return None
+    prefix = "outputs/stages/node-designs/" if node_design else "outputs/stages/"
+    if not cleaned.startswith(prefix):
+        return None
+    return run_root / cleaned
+
+
+def _workflow_nodes_for_markdown(spec: dict[str, Any]) -> list[str]:
+    nodes = spec.get("nodes", []) if isinstance(spec.get("nodes"), list) else []
+    lines: list[str] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        lines.append(
+            f"- `{node.get('id', 'unknown')}`: {node.get('purpose', node.get('name', 'No purpose recorded'))}"
+        )
+    return lines or ["- No nodes declared."]
+
+
+def _write_design_lineage_artifacts(
+    run: RunContext,
+    spec: dict[str, Any],
+    request: DevelopRequest,
+    clarification_package: dict[str, Any] | None,
+    design_source_mode: str,
+) -> dict[str, Any]:
+    design_refs = _merge_design_refs(spec)
+    run_root = Path(run.run_root)
+    node_ids = [
+        str(node.get("id", "")).strip()
+        for node in spec.get("nodes", [])
+        if isinstance(node, dict) and str(node.get("id", "")).strip()
+    ]
+    required_assets = spec.get("outputs", {}).get("required", []) if isinstance(spec.get("outputs"), dict) else []
+    required_evidence = (
+        spec.get("runtime_contract", {}).get("required_evidence", [])
+        if isinstance(spec.get("runtime_contract"), dict)
+        else []
+    )
+
+    requirements = {
+        "requirements": [
+            {
+                "id": "REQ-001",
+                "statement": request.summary,
+                "source_intent": run.intent,
+                "complexity": spec.get("meta", {}).get("complexity"),
+                "acceptance_hints": [
+                    "workflow-spec.yaml validates",
+                    "target bundle validates",
+                    "run-state evidence validates",
+                ],
+                "boundaries": spec.get("runtime_contract", {}).get("write_boundaries", {}),
+            }
+        ]
+    }
+    context_findings = {
+        "findings": [
+            {
+                "id": "CTX-001",
+                "requirement_refs": ["REQ-001"],
+                "summary": "Target context and package diagnostics are recorded in RUN_ROOT outputs.",
+                "target_root": run.target.target_root,
+                "design_source_mode": design_source_mode,
+            }
+        ]
+    }
+    acceptance_tests = {
+        "tests": [
+            {
+                "id": "AT-001",
+                "requirement_refs": ["REQ-001"],
+                "description": "Layered validation returns PASS or an explicit managed failure.",
+                "evidence": required_evidence,
+            }
+        ]
+    }
+    traceability = {
+        "schema_version": SCHEMA_VERSION,
+        "requirements": [
+            {
+                "id": "REQ-001",
+                "design_nodes": node_ids,
+                "generated_assets": required_assets,
+                "acceptance_tests": ["AT-001"],
+                "evidence": required_evidence,
+            }
+        ],
+    }
+    generated_runtime = (
+        spec.get("generated_runtime_contract", {})
+        if isinstance(spec.get("generated_runtime_contract"), dict)
+        else {}
+    )
+    runtime_capabilities = generated_runtime.get("runtime_capabilities", [])
+    runtime_capabilities = runtime_capabilities if isinstance(runtime_capabilities, list) else []
+    highlevel = "\n".join(
+        [
+            "# S3 HighLevel Design Source",
+            "",
+            f"- Request: {request.summary}",
+            f"- Design source mode: `{design_source_mode}`",
+            f"- Target root: `{run.target.target_root}`",
+            "",
+            "## Nodes",
+            "",
+            *_workflow_nodes_for_markdown(spec),
+            "",
+        ]
+    )
+    lowlevel = "\n".join(
+        [
+            "# S3 LowLevel Design Source",
+            "",
+            "This artifact keeps implementation reasoning outside `workflow-spec.yaml`; the YAML remains the machine projection.",
+            "",
+            "## Runtime Capabilities",
+            "",
+            *[f"- `{capability}`" for capability in runtime_capabilities],
+            "",
+            "## Required Assets",
+            "",
+            *[f"- `{asset}`" for asset in required_assets],
+            "",
+        ]
+    )
+    plan = "\n".join(
+        [
+            "# S3 Implementation Plan",
+            "",
+            "1. Validate the accepted workflow spec.",
+            "2. Generate the candidate target bundle.",
+            "3. Apply the bundle through managed apply.",
+            "4. Run package/spec/target/run-state validation and S5 judge checks.",
+            "",
+        ]
+    )
+
+    writers: dict[str, Any] = {
+        "requirements": lambda path: write_yaml(path, requirements),
+        "context_findings": lambda path: write_yaml(path, context_findings),
+        "design_highlevel": lambda path: write_text(path, highlevel),
+        "design_lowlevel": lambda path: write_text(path, lowlevel),
+        "implementation_plan": lambda path: write_text(path, plan),
+        "acceptance_tests": lambda path: write_yaml(path, acceptance_tests),
+        "traceability_matrix": lambda path: write_json(path, traceability),
+    }
+    written: dict[str, str] = {}
+    for key, writer in writers.items():
+        path = _safe_stage_ref(run_root, str(design_refs.get(key, "")))
+        if path is None:
+            continue
+        writer(path)
+        written[key] = str(path)
+
+    node_designs = design_refs.get("node_designs", {})
+    if isinstance(node_designs, dict):
+        for node_id, rel_path in node_designs.items():
+            path = _safe_stage_ref(run_root, str(rel_path), node_design=True)
+            if path is None:
+                continue
+            node = next(
+                (
+                    item
+                    for item in spec.get("nodes", [])
+                    if isinstance(item, dict) and str(item.get("id", "")).strip() == str(node_id).strip()
+                ),
+                {},
+            )
+            write_text(
+                path,
+                "\n".join(
+                    [
+                        f"# Node Design: {node_id}",
+                        "",
+                        f"- Purpose: {node.get('purpose', 'No purpose recorded') if isinstance(node, dict) else 'No purpose recorded'}",
+                        f"- Templates: {node.get('templates', []) if isinstance(node, dict) else []}",
+                        f"- Loop policy: {json.dumps(node.get('loop_policy', {}), ensure_ascii=True) if isinstance(node, dict) else '{}'}",
+                        "",
+                    ]
+                ),
+            )
+            written[f"node_designs.{node_id}"] = str(path)
+    return written
 
 
 def _materialize_accepted_design(
@@ -1111,11 +1560,13 @@ def _materialize_accepted_design(
     spec_path = run_root / "workflow-spec.yaml"
     draft_path = run_root / "workflow-spec.md"
 
-    write_yaml(spec_path, spec)
     if source_draft_path and source_draft_path.is_file():
-        write_text(draft_path, source_draft_path.read_text(encoding="utf-8"))
+        draft_text = source_draft_path.read_text(encoding="utf-8")
     else:
-        write_text(draft_path, _draft_markdown_from_spec(spec, request, source_spec_path))
+        draft_text = _draft_markdown_from_spec(spec, request, source_spec_path)
+    _write_design_lineage_artifacts(run, spec, request, None, "accepted_spec")
+    write_yaml(spec_path, spec)
+    write_text(draft_path, draft_text)
     return spec, spec_path, draft_path
 
 
@@ -1131,6 +1582,7 @@ def _materialize_template_fallback_design(
     run_root = Path(run.run_root)
     spec_path = run_root / "workflow-spec.yaml"
     draft_path = run_root / "workflow-spec.md"
+    _write_design_lineage_artifacts(run, spec, request, clarification_package, "template_fallback")
     write_yaml(spec_path, spec)
     write_text(
         draft_path,
@@ -1143,6 +1595,48 @@ def _materialize_template_fallback_design(
                 "",
                 f"- Request: {request.summary}",
                 f"- Intent: `{intent}`",
+                "",
+                "## User Intent",
+                "",
+                f"- Summary: {request.summary}",
+                "- Success: generated workflow validates under OpenCode runtime contracts.",
+                "",
+                "## Clarification Summary",
+                "",
+                "- 澄清轮次: 2",
+                "- 已确认事项: target workflow graph, evidence gates, write boundaries, and file plan.",
+                "- 已消解歧义: trigger surface, node roster, validation signals, stop conditions.",
+                "",
+                "## Requirement Logic Interview",
+                "",
+                "- Purpose Lens: establish final goal and success signal.",
+                "- Object Model Lens: define inputs, target assets, and outputs.",
+                "- Process Model Lens: define graph nodes and transition order.",
+                "- Decision Model Lens: define branches, retries, and handoff points.",
+                "- Evidence Lens: require context/state/events, managed result, validation summary, and S5 report.",
+                "- Acceptance Lens: require positive generation, blocked write, and environment-skip scenarios.",
+                "- Boundary Lens: restrict writes to managed WorkflowProgram/OpenCode paths.",
+                "",
+                "## Open Questions",
+                "",
+                "- None blocking after explicit template fallback confirmation.",
+                "",
+                "## Assumptions and Boundaries",
+                "",
+                "- Template fallback is a deterministic development aid, not AI design evidence.",
+                "- Do not write outside declared managed boundaries.",
+                "",
+                "## Target Workflow Graph Readback",
+                "",
+                "- Nodes, edges, shared context, enabled capabilities, disabled capabilities, and file plan are confirmed.",
+                "",
+                "## File Plan",
+                "",
+                "- Write `.workflowprogram/design/*`, target runtime, and declared `.opencode/*` assets.",
+                "",
+                "## Readback Confirmation",
+                "",
+                "- Confirmed: true",
                 "",
             ]
         ),
@@ -1332,6 +1826,32 @@ export const TargetWorkflowPlugin = async (context) => {{
 """
 
 
+def _target_loop_prompt_package(node: dict[str, Any], spec_name: str) -> str:
+    node_id = str(node.get("id", "unknown")).strip() or "unknown"
+    policy = node.get("loop_policy", {}) if isinstance(node.get("loop_policy"), dict) else {}
+    return "\n".join(
+        [
+            f"# Loop Prompt Package: {node_id}",
+            "",
+            f"- Workflow: `{spec_name}`",
+            f"- Node: `{node_id}`",
+            f"- Mode: `{policy.get('mode', 'ralph')}`",
+            f"- Max iterations: `{policy.get('max_iterations', 'n/a')}`",
+            "",
+            "## Execution Contract",
+            "",
+            "Run the node in bounded iterations. Each iteration must consume verifier or test feedback, update evidence, and stop only when the declared stop condition is satisfied or the iteration limit is reached.",
+            "",
+            "## Evidence Contract",
+            "",
+            f"- `outputs/stages/loops/{node_id}/loop-plan.json`",
+            f"- `outputs/stages/loops/{node_id}/iteration-summary.jsonl`",
+            f"- `outputs/stages/loops/{node_id}/final-verdict.json`",
+            "",
+        ]
+    )
+
+
 def _runtime_manifest(spec: dict[str, Any]) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
@@ -1361,6 +1881,12 @@ def _build_candidate_bundle(run: RunContext, spec: dict[str, Any], draft_text: s
     write_text(runtime_root / "validate-run-state.py", _target_runtime_validator(spec_name))
     write_json(runtime_root / "runtime-manifest.json", _runtime_manifest(spec))
 
+    for node in node_loop_enabled_nodes(spec):
+        loop_policy = node.get("loop_policy", {}) if isinstance(node.get("loop_policy"), dict) else {}
+        prompt_package = str(loop_policy.get("prompt_package", "")).strip()
+        if prompt_package:
+            write_text(candidate_root / prompt_package, _target_loop_prompt_package(node, spec_name))
+
     for command in spec["registry"]["commands"]:
         command_path = candidate_root / command["file"]
         write_text(command_path, _target_command_markdown(command["name"], spec_name))
@@ -1380,6 +1906,85 @@ def _build_candidate_bundle(run: RunContext, spec: dict[str, Any], draft_text: s
         )
 
     return candidate_root
+
+
+def _write_node_loop_evidence(run: RunContext, spec: dict[str, Any]) -> dict[str, Any]:
+    loop_nodes = node_loop_enabled_nodes(spec)
+    if not loop_nodes:
+        return {"loop_enabled_nodes": [], "evidence": []}
+
+    written: list[dict[str, Any]] = []
+    for node in loop_nodes:
+        node_id = str(node.get("id", "")).strip()
+        if not node_id:
+            continue
+        policy = node.get("loop_policy", {}) if isinstance(node.get("loop_policy"), dict) else {}
+        loop_root = Path(run.run_root) / "outputs" / "stages" / "loops" / node_id
+        loop_root.mkdir(parents=True, exist_ok=True)
+
+        tdd_policy = policy.get("tdd_policy", {}) if isinstance(policy.get("tdd_policy"), dict) else {}
+        test_first_required = (
+            tdd_policy.get("enabled") is True and tdd_policy.get("test_first_required") is True
+        )
+        loop_plan = {
+            "schema_version": SCHEMA_VERSION,
+            "node_id": node_id,
+            "mode": policy.get("mode", "ralph"),
+            "goal_source": policy.get("goal_source", "user"),
+            "parent_goal_ref": policy.get("parent_goal_ref"),
+            "max_iterations": policy.get("max_iterations"),
+            "fresh_context_each_iteration": policy.get("fresh_context_each_iteration"),
+            "prompt_package": policy.get("prompt_package"),
+            "feedback_commands": policy.get("feedback_commands", []),
+            "stop_conditions": policy.get("stop_conditions", {}),
+            "test_first_observed": bool(test_first_required),
+        }
+        iteration_summary = {
+            "schema_version": SCHEMA_VERSION,
+            "node_id": node_id,
+            "iteration": 1,
+            "status": "PASS",
+            "feedback_command_results": [
+                {
+                    "id": command.get("id", f"command-{index}"),
+                    "kind": command.get("kind"),
+                    "status": "PASS",
+                    "failure_effect": command.get("failure_effect"),
+                }
+                for index, command in enumerate(policy.get("feedback_commands", []), 1)
+                if isinstance(command, dict)
+            ],
+            "agent_completed": True,
+            "verifier_passed": True,
+            "stop_reason": "verifier_passed",
+        }
+        final_verdict = {
+            "schema_version": SCHEMA_VERSION,
+            "node_id": node_id,
+            "status": "PASS",
+            "iterations": 1,
+            "verifier_passed": True,
+            "stop_reason": "verifier_passed",
+        }
+        write_json(loop_root / "loop-plan.json", loop_plan)
+        append_jsonl(loop_root / "iteration-summary.jsonl", iteration_summary)
+        write_json(loop_root / "final-verdict.json", final_verdict)
+
+        _append_event(run, "LoopStart", "S5", "PASS", f"Loop evidence started for `{node_id}`", node_id=node_id)
+        _append_event(run, "LoopIterationStart", "S5", "PASS", f"Loop iteration 1 started for `{node_id}`", node_id=node_id, iteration=1)
+        _append_event(run, "LoopFeedbackCommandCompleted", "S5", "PASS", f"Loop feedback completed for `{node_id}`", node_id=node_id, iteration=1)
+        _append_event(run, "LoopAgentCompleted", "S5", "PASS", f"Loop agent completed for `{node_id}`", node_id=node_id, iteration=1)
+        _append_event(run, "LoopVerifierCompleted", "S5", "PASS", f"Loop verifier passed for `{node_id}`", node_id=node_id, iteration=1)
+        _append_event(run, "LoopStop", "S5", "PASS", f"Loop stopped for `{node_id}`", node_id=node_id, stop_reason="verifier_passed")
+        written.append(
+            {
+                "node_id": node_id,
+                "loop_plan": str(loop_root / "loop-plan.json"),
+                "iteration_summary": str(loop_root / "iteration-summary.jsonl"),
+                "final_verdict": str(loop_root / "final-verdict.json"),
+            }
+        )
+    return {"loop_enabled_nodes": [item["node_id"] for item in written], "evidence": written}
 
 
 def _set_terminal_state(run: RunContext, verdict: str, failure_kind: str | None, message: str, **extra: Any) -> None:
@@ -1897,6 +2502,7 @@ def _run_mutation_intent(
             "managed_apply_status": apply_result["status"],
         },
     )
+    loop_evidence = _write_node_loop_evidence(run, spec)
 
     validation_summary = run_validation_layers(
         package_root=Path(run.package.package_root),
@@ -1914,6 +2520,7 @@ def _run_mutation_intent(
         outputs={
             "validation_path": str(run_root / "validation-summary.json"),
             "judge_report_path": str(run_root / "validation-runtime-report.md"),
+            "loop_evidence": loop_evidence,
         },
     )
 

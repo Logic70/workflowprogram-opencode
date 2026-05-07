@@ -26,6 +26,9 @@
 | 安装生命周期产品化 | 支持 status、upgrade、uninstall、offline lock、project-local venv、bootstrap status，便于本地项目长期维护 | `package-deploy.py`、`bootstrap-runtime.py`、install/status docs |
 | schema/error/privacy 契约 | spec、manifest、run-state、install manifest 具备 schema version；错误码和隐私脱敏形成跨 validator/runtime 的统一约束 | schema migration、error taxonomy、privacy redaction |
 | AI graph 设计的确定性落地 | stage/intentflow 的结构固定，但节点名称、顺序、分支、fan-in/out、准入准出、可选自迭代和 hook 由 AI/user 在 accepted spec 中定义 | `workflow-spec.md`、`workflow-spec.yaml`、graph validator |
+| 设计源血缘 | 保留 Claude 最新的 requirement -> design -> traceability -> evidence 结构校验，但使用 OpenCode `design_refs` 和 `RUN_ROOT/outputs/stages/*` | `workflow-runner.py`、`workflow_spec_validator.py`、`workflow-s5-judge.py` |
+| 节点循环策略 | 保留 Claude 最新的 Ralph-style bounded loop 语义，但映射到 OpenCode `nodes[*].loop_policy`，不引入 `workflow_graph` 包装层 | loop policy validator、loop prompt package、loop evidence |
+| 需求逻辑访谈 | 保留 Claude 最新 S1 深度澄清语义，但映射为 OpenCode `outputs/clarification/*` 与 `outputs/stages/*` 双路径证据 | `question-backlog.json`、`requirement-logic-map.json`、draft/run-state/S5 validators |
 
 ## 能力映射
 
@@ -44,7 +47,7 @@
 | Custom tool | Claude tool/plugin 扩展 | 部分实现 | OpenCode plugin bridge 后续补 tool registry 约束 | `opencode-contract-hardening` |
 | Runtime 主链 | workflow-entry / workflow-runner | 已实现 | Python runtime under package root | 已完成 |
 | 运行状态总线 | `state-bus.py`、`stage-progress.py` | 部分实现 | 当前有 run evidence；后续补统一状态总线和进度工具 | `opencode-validation-depth` |
-| 澄清包 | clarification package/review | 已实现 | 已有澄清资产并补充 clarification review generator | `opencode-validation-depth` |
+| 需求逻辑访谈 | requirement logic interview / clarification package / review | 已实现 | S1 生成 `question-backlog.json`、`requirement-logic-map.json`、challenge/handoff/evidence，并由 draft/run-state/S5 强校验 | `add-opencode-requirement-logic-interview` |
 | 深度校验 | draft/runtime/lessons validators | 已实现 | 增加 deep validators；不把 generated design view 当作核心语义来源 | `opencode-validation-depth` |
 | Host doctor | doctor/probe/remediation | 已实现 | 补齐 host isolation、版本兼容、reload 诊断 | `opencode-host-isolation-and-compatibility` |
 | Host bootstrap | apply-host-bootstrap | 替代实现 | OpenCode 不默认改全局配置；提供诊断和显式 remediation | `opencode-host-isolation-and-compatibility` |
@@ -56,6 +59,8 @@
 | Schema 演进 | 隐式脚本契约 | 已实现 | schema version + migration | `opencode-contract-hardening` |
 | 写入恢复 | managed generation | 已实现 | lock、idempotency、rollback/recover manifest | `opencode-contract-hardening` |
 | 权限与隐私 | settings/hooks 约束 | 已实现 | permission policy + privacy redaction | `opencode-contract-hardening` |
+| 设计源血缘 | `design_refs`、traceability matrix、node-design S5 checks | 已实现 | OpenCode top-level `design_refs` + `RUN_ROOT/outputs/stages/*` + S5 lineage checks | `replicate-claude-latest-contracts` |
+| 节点循环策略 | `workflow_graph.nodes[*].loop_policy`、`node_loop_execution`、loop evidence | 已实现 | OpenCode `nodes[*].loop_policy` + loop prompt package + loop evidence checks | `replicate-claude-latest-contracts` |
 | Claude plugin metadata | `.claude-plugin/plugin.json`、marketplace | 不适用 | 不迁移；OpenCode 使用 `.opencode/*` 加载 | 无 |
 
 ## 当前完成范围
@@ -64,4 +69,6 @@
 |---|---|
 | 本次已完成 | audit/evolve/orchestrate、agentteam role schema、test-scenario-generator、host isolation、target host reload smoke、capability parity 维护 |
 | 本次已完成 | release build、schema migration、managed apply hardening、error taxonomy、deep validators、offline/reinstall/status regression |
+| 本次已完成 | Claude 最新设计源血缘契约、节点循环策略契约、runtime capability 与 S5 evidence checks |
+| 本次已完成 | Claude 最新 S1 需求逻辑访谈契约、七个 logic lenses、shallow draft 拦截与 S2/S3 handoff 校验 |
 | 后续可规划 | target agents/skills、marketplace/npm 发布、多宿主抽象 |

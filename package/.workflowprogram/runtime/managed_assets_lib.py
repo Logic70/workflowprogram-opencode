@@ -13,6 +13,7 @@ from runtime_common import SCHEMA_VERSION, append_jsonl, iso_now, read_json, sha
 
 ALLOWED_MANAGED_PREFIXES = (
     ".workflowprogram/design/",
+    ".workflowprogram/loops/",
     ".workflowprogram/runtime/",
     ".opencode/commands/",
     ".opencode/plugins/",

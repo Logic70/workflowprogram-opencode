@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -23,7 +24,9 @@ from runtime_common import (  # noqa: E402
     PACKAGE_PLUGIN_ID,
     PRODUCT_INTENT_CONTRACT,
     SCHEMA_VERSION,
+    VALID_RUNTIME_CAPABILITIES,
     derive_expected_target_files,
+    node_loop_enabled_nodes,
     read_yaml,
     registry_commands,
     registry_plugins,
@@ -57,6 +60,31 @@ REQUIRED_GENERATED_RUNTIME_KEYS = {
     "runtime_capabilities",
 }
 ALLOWED_TARGET_PLUGIN_HOOK_EVENTS = {"event", "tool.execute.before", "tool.execute.after"}
+VALID_LOOP_MODES = {"ralph"}
+VALID_LOOP_GOAL_SOURCES = {"user", "model_subgoal"}
+VALID_LOOP_FEEDBACK_KINDS = {"validator", "verifier", "test"}
+VALID_LOOP_FAILURE_EFFECTS = {"feedback", "gate", "hard_fail"}
+VALID_LOOP_MAX_ITERATION_EFFECTS = {"fail", "warn"}
+DESIGN_REF_PATH_KEYS = {
+    "requirements",
+    "context_findings",
+    "design_highlevel",
+    "design_lowlevel",
+    "implementation_plan",
+    "acceptance_tests",
+    "traceability_matrix",
+}
+
+
+def _safe_relative_path(path_text: str) -> bool:
+    cleaned = path_text.strip().replace("\\", "/")
+    if not cleaned or cleaned.startswith("/") or cleaned.startswith("~") or "//" in cleaned:
+        return False
+    return all(part not in {"", ".", ".."} for part in cleaned.split("/"))
+
+
+def _safe_slug(value: str) -> bool:
+    return bool(re.match(r"^[A-Za-z0-9_-]+$", value))
 
 
 def _check(check_id: str, passed: bool, detail: str, category: str) -> dict[str, Any]:
@@ -68,6 +96,153 @@ def _check(check_id: str, passed: bool, detail: str, category: str) -> dict[str,
         "error_code": None if passed else code_for(category, check_id),
         "remediation": None if passed else remediation_for(category),
     }
+
+
+def _validate_node_loop_policy(node: dict[str, Any], node_index: int) -> list[str]:
+    errors: list[str] = []
+    node_id = str(node.get("id", "")).strip()
+    policy = node.get("loop_policy")
+    if policy is None:
+        return errors
+    prefix = f"nodes[{node_index}].loop_policy"
+    if not isinstance(policy, dict):
+        return [f"{prefix} must be an object"]
+
+    enabled = policy.get("enabled")
+    if not isinstance(enabled, bool):
+        return [f"{prefix}.enabled must be a boolean"]
+    if enabled is False:
+        return errors
+
+    mode = str(policy.get("mode", "")).strip()
+    if mode not in VALID_LOOP_MODES:
+        errors.append(f"{prefix}.mode must be one of {sorted(VALID_LOOP_MODES)}")
+
+    max_iterations = policy.get("max_iterations")
+    if not isinstance(max_iterations, int) or max_iterations < 1 or max_iterations > 50:
+        errors.append(f"{prefix}.max_iterations must be an integer between 1 and 50")
+
+    if not isinstance(policy.get("fresh_context_each_iteration"), bool):
+        errors.append(f"{prefix}.fresh_context_each_iteration must be a boolean")
+
+    prompt_package = str(policy.get("prompt_package", "")).strip().replace("\\", "/")
+    if not _safe_relative_path(prompt_package):
+        errors.append(f"{prefix}.prompt_package must be a safe relative path")
+    elif not prompt_package.startswith(".workflowprogram/loops/"):
+        errors.append(f"{prefix}.prompt_package must stay under .workflowprogram/loops/**")
+
+    goal_source = str(policy.get("goal_source", "user")).strip() or "user"
+    if goal_source not in VALID_LOOP_GOAL_SOURCES:
+        errors.append(f"{prefix}.goal_source must be one of {sorted(VALID_LOOP_GOAL_SOURCES)}")
+    if goal_source == "model_subgoal" and not str(policy.get("parent_goal_ref", "")).strip():
+        errors.append(f"{prefix}.parent_goal_ref is required when goal_source=model_subgoal")
+
+    feedback_commands = policy.get("feedback_commands", [])
+    if not isinstance(feedback_commands, list) or not feedback_commands:
+        errors.append(f"{prefix}.feedback_commands must be a non-empty list")
+        feedback_commands = []
+    for command_index, raw_command in enumerate(feedback_commands):
+        command_prefix = f"{prefix}.feedback_commands[{command_index}]"
+        if not isinstance(raw_command, dict):
+            errors.append(f"{command_prefix} must be an object")
+            continue
+        if not str(raw_command.get("id", "")).strip():
+            errors.append(f"{command_prefix}.id is required")
+        if str(raw_command.get("kind", "")).strip() not in VALID_LOOP_FEEDBACK_KINDS:
+            errors.append(f"{command_prefix}.kind must be one of {sorted(VALID_LOOP_FEEDBACK_KINDS)}")
+        if "command" in raw_command:
+            errors.append(f"{command_prefix}.command is not allowed; use structured argv")
+        argv = raw_command.get("argv")
+        if not isinstance(argv, list) or not argv or any(not str(item).strip() for item in argv):
+            errors.append(f"{command_prefix}.argv must be a non-empty list of strings")
+        timeout = raw_command.get("timeout_seconds")
+        if timeout is not None and (not isinstance(timeout, int) or timeout < 1 or timeout > 600):
+            errors.append(f"{command_prefix}.timeout_seconds must be an integer between 1 and 600")
+        if str(raw_command.get("failure_effect", "")).strip() not in VALID_LOOP_FAILURE_EFFECTS:
+            errors.append(
+                f"{command_prefix}.failure_effect must be one of {sorted(VALID_LOOP_FAILURE_EFFECTS)}"
+            )
+
+    stop_conditions = policy.get("stop_conditions", {})
+    if not isinstance(stop_conditions, dict):
+        errors.append(f"{prefix}.stop_conditions must be an object")
+        stop_conditions = {}
+    success = stop_conditions.get("success", [])
+    if not isinstance(success, list) or not [str(item).strip() for item in success]:
+        errors.append(f"{prefix}.stop_conditions.success must be a non-empty list")
+    if str(stop_conditions.get("max_iterations", "")).strip() not in VALID_LOOP_MAX_ITERATION_EFFECTS:
+        errors.append(
+            f"{prefix}.stop_conditions.max_iterations must be one of {sorted(VALID_LOOP_MAX_ITERATION_EFFECTS)}"
+        )
+    no_progress = stop_conditions.get("no_progress_iterations")
+    if no_progress is not None:
+        if not isinstance(no_progress, int) or no_progress < 1:
+            errors.append(f"{prefix}.stop_conditions.no_progress_iterations must be a positive integer")
+        elif isinstance(max_iterations, int) and no_progress > max_iterations:
+            errors.append(f"{prefix}.stop_conditions.no_progress_iterations must be <= max_iterations")
+    hard_fail_on = stop_conditions.get("hard_fail_on", [])
+    if hard_fail_on is not None and not isinstance(hard_fail_on, list):
+        errors.append(f"{prefix}.stop_conditions.hard_fail_on must be a list when provided")
+
+    tdd_policy = policy.get("tdd_policy", {})
+    if tdd_policy:
+        if not isinstance(tdd_policy, dict):
+            errors.append(f"{prefix}.tdd_policy must be an object")
+        else:
+            tdd_enabled = tdd_policy.get("enabled", False)
+            if not isinstance(tdd_enabled, bool):
+                errors.append(f"{prefix}.tdd_policy.enabled must be a boolean")
+            if tdd_enabled:
+                for key in ("test_first_required", "red_green_refactor"):
+                    if not isinstance(tdd_policy.get(key), bool):
+                        errors.append(f"{prefix}.tdd_policy.{key} must be a boolean when tdd_policy.enabled=true")
+
+    expected_evidence_prefix = f"outputs/stages/loops/{node_id}/"
+    evidence_outputs = policy.get("evidence_outputs", [])
+    if not isinstance(evidence_outputs, list) or not evidence_outputs:
+        errors.append(f"{prefix}.evidence_outputs must be a non-empty list")
+    else:
+        for output_index, raw_output in enumerate(evidence_outputs):
+            output = str(raw_output).strip().replace("\\", "/")
+            if not _safe_relative_path(output):
+                errors.append(f"{prefix}.evidence_outputs[{output_index}] must be a safe relative path")
+            elif not output.startswith(expected_evidence_prefix):
+                errors.append(f"{prefix}.evidence_outputs[{output_index}] must stay under {expected_evidence_prefix}**")
+    return errors
+
+
+def _validate_design_refs(design_refs: Any, node_ids: set[str]) -> list[str]:
+    if design_refs in (None, {}):
+        return []
+    if not isinstance(design_refs, dict):
+        return ["design_refs must be an object when declared"]
+    errors: list[str] = []
+    for key in DESIGN_REF_PATH_KEYS:
+        if key not in design_refs:
+            continue
+        value = str(design_refs.get(key, "")).strip().replace("\\", "/")
+        if not _safe_relative_path(value):
+            errors.append(f"design_refs.{key} must be a safe relative path")
+        elif not value.startswith("outputs/stages/"):
+            errors.append(f"design_refs.{key} must stay under outputs/stages/")
+    node_designs = design_refs.get("node_designs")
+    if node_designs is None:
+        return errors
+    if not isinstance(node_designs, dict):
+        errors.append("design_refs.node_designs must be a mapping of node id to path")
+        return errors
+    for raw_node_id, raw_path in node_designs.items():
+        node_id = str(raw_node_id).strip()
+        path = str(raw_path).strip().replace("\\", "/")
+        if not node_id:
+            errors.append("design_refs.node_designs contains an empty node id")
+        elif node_id not in node_ids:
+            errors.append(f"design_refs.node_designs references unknown node: {node_id}")
+        if not _safe_relative_path(path):
+            errors.append(f"design_refs.node_designs.{node_id or '<missing>'} must be a safe relative path")
+        elif not path.startswith("outputs/stages/node-designs/"):
+            errors.append(f"design_refs.node_designs.{node_id} must stay under outputs/stages/node-designs/")
+    return errors
 
 
 def validate_workflow_spec(spec_path: Path) -> dict[str, Any]:
@@ -129,11 +304,27 @@ def validate_workflow_spec(spec_path: Path) -> dict[str, Any]:
         for list_key in ("inputs", "outputs", "preconditions", "postconditions"):
             if not isinstance(node.get(list_key), list):
                 node_schema_ok = False
+        if str(node.get("id", "")).strip() and not _safe_slug(str(node.get("id", "")).strip()):
+            node_schema_ok = False
     checks.append(
         _check(
             "SPEC-03",
             node_schema_ok,
             f"node_ids={node_ids}",
+            "design",
+        )
+    )
+
+    loop_policy_errors: list[str] = []
+    for index, node in enumerate(nodes):
+        if isinstance(node, dict):
+            loop_policy_errors.extend(_validate_node_loop_policy(node, index))
+    loop_enabled_ids = [str(node.get("id", "")).strip() for node in node_loop_enabled_nodes(spec)]
+    checks.append(
+        _check(
+            "SPEC-18",
+            not loop_policy_errors,
+            f"loop_enabled_nodes={loop_enabled_ids} errors={loop_policy_errors}",
             "design",
         )
     )
@@ -277,6 +468,16 @@ def validate_workflow_spec(spec_path: Path) -> dict[str, Any]:
         )
     )
 
+    design_ref_errors = _validate_design_refs(spec.get("design_refs"), unique_node_ids)
+    checks.append(
+        _check(
+            "SPEC-19",
+            not design_ref_errors,
+            f"declared={isinstance(spec.get('design_refs'), dict)} errors={design_ref_errors}",
+            "design",
+        )
+    )
+
     self_iteration_selected = "self-iteration-loop" in template_ids
     self_iteration_template = template_by_id.get("self-iteration-loop")
     self_iteration_ok = True
@@ -398,6 +599,37 @@ def validate_workflow_spec(spec_path: Path) -> dict[str, Any]:
         if isinstance(spec.get("generated_runtime_contract"), dict)
         else {}
     )
+    runtime_capabilities = (
+        generated_runtime_contract.get("runtime_capabilities", [])
+        if isinstance(generated_runtime_contract.get("runtime_capabilities"), list)
+        else []
+    )
+    runtime_capability_errors: list[str] = []
+    normalized_capabilities = [str(item).strip() for item in runtime_capabilities if str(item).strip()]
+    if not normalized_capabilities:
+        runtime_capability_errors.append("generated_runtime_contract.runtime_capabilities must be a non-empty list")
+    for capability in normalized_capabilities:
+        if capability not in VALID_RUNTIME_CAPABILITIES:
+            runtime_capability_errors.append(
+                f"generated_runtime_contract.runtime_capabilities contains unsupported capability: {capability}"
+            )
+    for required_capability in ("state_transitions", "run_state_validation"):
+        if required_capability not in normalized_capabilities:
+            runtime_capability_errors.append(
+                f"generated_runtime_contract.runtime_capabilities must include {required_capability}"
+            )
+    if registry_commands(spec) and "target_command_delivery" not in normalized_capabilities:
+        runtime_capability_errors.append(
+            "generated_runtime_contract.runtime_capabilities must include target_command_delivery when registry.commands is declared"
+        )
+    if registry_plugins(spec) and "target_plugin_bridge" not in normalized_capabilities:
+        runtime_capability_errors.append(
+            "generated_runtime_contract.runtime_capabilities must include target_plugin_bridge when registry.plugins is declared"
+        )
+    if loop_enabled_ids and "node_loop_execution" not in normalized_capabilities:
+        runtime_capability_errors.append(
+            "generated_runtime_contract.runtime_capabilities must include node_loop_execution when nodes[*].loop_policy.enabled=true"
+        )
     deliverables = derive_expected_target_files(spec)
     deliverables_ok = (
         set(REQUIRED_GENERATED_RUNTIME_KEYS).issubset(set(generated_runtime_contract.keys()))
@@ -409,6 +641,14 @@ def validate_workflow_spec(spec_path: Path) -> dict[str, Any]:
             "SPEC-06",
             deliverables_ok,
             f"deliverables={deliverables}",
+            "design",
+        )
+    )
+    checks.append(
+        _check(
+            "SPEC-20",
+            not runtime_capability_errors,
+            f"runtime_capabilities={normalized_capabilities} errors={runtime_capability_errors}",
             "design",
         )
     )

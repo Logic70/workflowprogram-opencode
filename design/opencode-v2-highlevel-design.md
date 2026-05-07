@@ -60,16 +60,19 @@
 | AR-10 | 最小可安装 | v1 以 `package/` 作为部署源，通过安装脚本生成宿主可发现布局，不依赖额外构建产物 |
 | AR-11 | 生命周期入口完整 | 产品 intent 必须覆盖 develop/validate/preflight/hotfix/iterate/ship/audit/evolve/orchestrate，且 command、runtime、spec flow 三者一致 |
 | AR-12 | 团队编排可建模 | package agents 需要具备角色、阶段、触发条件和汇聚策略，支持 agentteam 与 subagent 执行机制分离 |
-| AR-13 | 宿主隔离可诊断 | 能识别 OpenCode 全局配置、Claude 目录、oh-my-opencode 或其它外部资产对当前项目的污染风险 |
-| AR-14 | 目标加载可验证 | smoke 必须区分 package host 可见性与 target workflow host reload 可见性 |
-| AR-15 | 发布包可复现 | release 包必须从干净构建产物生成，不携带 runs、cache、node_modules 等本地运行痕迹 |
-| AR-16 | 契约可演进 | spec、manifest、run-state、error code 必须具备版本与迁移策略 |
-| AR-17 | 写入可恢复 | managed apply 必须支持冲突检测、并发锁、幂等性、回滚或可恢复失败 |
-| AR-18 | 运行可审计 | 权限、隐私脱敏、日志保留、错误分类必须可被 validator 和 doctor 统一解释 |
-| AR-19 | 平台边界明确 | WSL/Windows 路径、离线依赖、OpenCode 版本兼容和 plugin reload 规则必须显式记录 |
+| AR-13 | S1 需求逻辑访谈可验证 | develop 不能只依赖泛澄清；必须按七个 logic lenses 形成 question backlog、requirement logic map 与 S2/S3 handoff 证据 |
+| AR-14 | 宿主隔离可诊断 | 能识别 OpenCode 全局配置、Claude 目录、oh-my-opencode 或其它外部资产对当前项目的污染风险 |
+| AR-15 | 目标加载可验证 | smoke 必须区分 package host 可见性与 target workflow host reload 可见性 |
+| AR-16 | 发布包可复现 | release 包必须从干净构建产物生成，不携带 runs、cache、node_modules 等本地运行痕迹 |
+| AR-17 | 契约可演进 | spec、manifest、run-state、error code 必须具备版本与迁移策略 |
+| AR-18 | 写入可恢复 | managed apply 必须支持冲突检测、并发锁、幂等性、回滚或可恢复失败 |
+| AR-19 | 运行可审计 | 权限、隐私脱敏、日志保留、错误分类必须可被 validator 和 doctor 统一解释 |
+| AR-20 | 平台边界明确 | WSL/Windows 路径、离线依赖、OpenCode 版本兼容和 plugin reload 规则必须显式记录 |
 | AR-20 | 能力差距可追踪 | ClaudeCode 到 OpenCode 的能力映射必须维护为设计资产，明确已实现、不适用、待规划和替代实现 |
 | AR-21 | 全局部署器轻量化 | 为改善新项目体验，可提供全局 bootstrap，但完整 WorkflowProgram 仍必须物化为 project-local 安装 |
 | AR-22 | AI 协作层显式化 | `/wp-*` 命令必须由 OpenCode host/model 完成设计与回读确认，Python runtime 只消费已接受的 `workflow-spec.yaml` 并负责确定性校验、生成和写入 |
+| AR-23 | 设计源血缘可验证 | `workflow-spec.yaml` 可通过 `design_refs` 引用 `RUN_ROOT/outputs/stages/*` 设计源，S5 必须检查需求到 traceability/evidence 的结构链路 |
+| AR-24 | 节点循环策略可验证 | 目标 graph node 可声明 `loop_policy`，但必须有边界、结构化 feedback command、runtime capability 与 loop evidence |
 
 ### 架构级原则与约束
 
@@ -91,6 +94,9 @@
 - package runtime 的 Python 依赖必须显式声明；v1 通过 `requirements.txt` 声明，并允许安装器创建 `.workflowprogram/package/.venv` 作为专用解释器。
 - package command 可以通过 `agent-team-planner.py` 或 `team-plan` 获取可选 agent 调度建议；planner 输出不是 mutation 成功条件。
 - `/wp-develop` 默认必须先完成交互式澄清、设计回读确认并形成 `workflow-spec.md` / `workflow-spec.yaml`；未确认请求或缺少 accepted spec 时只能产出 blocking questions/WARN，不得直接生成 target bundle。`--ai-evidence` 仅是 legacy 诊断字段，不能替代 accepted spec 或用户确认。
+- `workflow-spec.yaml.design_refs` 只引用设计源证据路径，不嵌入完整设计推理；路径必须位于 `RUN_ROOT/outputs/stages/**`，target spec 不得借此访问 package 或宿主私有路径。
+- `nodes[*].loop_policy` 只描述目标 graph node 的 bounded iteration，不改变 WorkflowProgram 产品自身生命周期，也不代表 Python runtime 直接调用 OpenCode subagent。
+- 当任一 node 启用 `loop_policy.enabled=true`，`generated_runtime_contract.runtime_capabilities` 必须包含 `node_loop_execution`，且 S5 必须看到 loop-plan、iteration-summary、final-verdict 与 loop events。
 - Python runtime 不直接调用 OpenCode subagent；OpenCode host 或用户显式调用 package agents，runtime 记录和校验可回放证据。
 - 任何运行时依赖的 validator 脚本都必须随 `WP_PACKAGE_ROOT` 一起交付，不得依赖仓库根目录中的额外源码。
 - 所有目标写入必须先生成 candidate，再执行 managed apply。
@@ -493,6 +499,9 @@ v1 采用 `source-as-deployment-source` 模式。
 | GC-10 | 增加深度 validator 与 fixtures | 校验层 | 补 workflow draft、lowlevel、generated runtime、lessons delta、clarification review 与 golden fixtures | P2 |
 | GC-11 | 增强安装生命周期 | 部署层 | 覆盖 upgrade/uninstall/status/offline install/dependency lock/WSL-Windows path 场景 | P2 |
 | GC-12 | 建立能力映射矩阵 | 设计资产 | 维护 ClaudeCode capability -> OpenCode capability 的状态矩阵 | P1 |
+| GC-13 | 设计源血缘契约 | 设计控制层 / 证据层 | 将 Claude `design_refs` 语义映射为 OpenCode top-level `design_refs` 与 S5 lineage checks | P1 |
+| GC-14 | 需求逻辑访谈契约 | 设计控制层 / 证据层 | 将 Claude S1 requirement logic interview 映射为 OpenCode clarification/stages 双路径证据，并由 draft、run-state、S5 校验 | P1 |
+| GC-15 | 节点循环策略契约 | 工作流语义层 / 证据层 | 将 Claude `workflow_graph.nodes[*].loop_policy` 映射为 OpenCode `nodes[*].loop_policy` 与 loop evidence checks | P1 |
 
 ### 扩展上下文模型
 
@@ -531,12 +540,15 @@ graph TB
 | Intent Contract Registry | 维护 command、runtime intent、spec flow 的一致性 | `IntentContract.Resolve` | 设计控制层 |
 | Agent Role Registry | 维护 agent 的角色、阶段、能力、触发条件 | `AgentRole.Resolve` | 设计控制层 |
 | Agent Team Planner | 根据目标工作流阶段规划 agentteam，生成 host-mediated subagent 调度建议和汇聚策略 | `AgentTeam.Plan` | 设计控制层 |
+| Requirement Logic Interview | 按七个 logic lenses 记录 S1 深度澄清、设计影响、challenge roles 与 S2/S3 handoff | `S1.RequirementLogicInterview` | 设计控制层 / 证据层 |
 | Host Isolation Doctor | 检查宿主配置污染、全局资产串入、OpenCode 版本与 reload 状态 | `HostIsolation.Check` | OM层 |
 | Target Host Smoke Runner | 验证 target command/plugin 被真实 OpenCode host 发现 | `TargetHostSmoke.Run` | 校验层 |
 | Release Builder | 生成干净发布包和完整性清单 | `Release.Build` | 构建层 |
 | Migration Engine | 对 spec、manifest、run-state 做版本迁移 | `Migration.Apply` | 数据层 |
 | Error Taxonomy | 统一错误码、失败分类与 remediation 文案 | `ErrorTaxonomy.Lookup` | OM层 |
 | Capability Parity Matrix | 记录 ClaudeCode 能力与 OpenCode 能力状态 | `Parity.Query` | 设计资产 |
+| Design Lineage Checker | 校验 `design_refs` 指向的设计源、node-design 与 traceability 结构链路 | `Lineage.Check` | 证据与校验层 |
+| Node Loop Evidence Checker | 校验 `nodes[*].loop_policy` 的运行能力声明、prompt package 与 loop evidence | `NodeLoop.Check` | 证据与校验层 |
 
 ### 扩展数据所有权
 
@@ -551,6 +563,8 @@ graph TB
 | Migration Manifest | Migration Engine | validators / runtime | migration engine | host loader |
 | Error Code Registry | Error Taxonomy | all runtime components | package maintainer | target workflow |
 | Capability Parity Matrix | package maintainer | user / planner | package maintainer | runtime mutators |
+| Design Refs | Workflow Spec Engine | spec validator / S5 judge | runtime materialization / accepted spec author | package loader |
+| Node Loop Evidence | Runtime Orchestrator | run-state validator / S5 judge | runtime / host-mediated execution evidence | package loader |
 
 ### 架构决策
 
@@ -558,6 +572,8 @@ graph TB
 |---|---|
 | ClaudeCode 能力是否直接复制路径 | 不复制；只做语义级能力映射 |
 | OpenCode package 是否仍是独立项目 | 是；所有新增能力必须先落到 OpenCode 独立仓库的 package/runtime/docs/spec |
+| Claude `workflow_graph.nodes[*].loop_policy` 是否照抄字段路径 | 不照抄；OpenCode 使用已存在的 top-level `nodes[*].loop_policy` |
+| Claude 设计血缘是否复制 `.claude` stage 文件 | 不复制；OpenCode 写入 `RUN_ROOT/outputs/stages/*` 并由 `design_refs` 引用 |
 | `audit` 不一致如何处理 | 必须补 `/wp-audit` 与 runtime handler，或移除 spec 中的 `audit` flow；优先补齐 |
 | agentteam 与 subagent 是否等价 | 不等价；agentteam 是阶段职责与团队结构，subagent 是执行机制 |
 | runtime 是否直接执行 OpenCode subagent | v1 不直接执行；runtime 生成 `team-plan.json/md`，由 OpenCode host 或用户按建议显式调用 package agent，并以独立 agent 输出作为执行证据 |

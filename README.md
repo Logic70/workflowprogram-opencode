@@ -19,6 +19,9 @@ WorkflowProgram 的 OpenCode 独立版本。
 - 全局轻量 bootstrap：`/wp-install`、`/wp-status`、`/wp-upgrade`、`/wp-uninstall`
 - 可选 package 专用 Python `venv`
 - runtime smoke、真实 OpenCode package host integration smoke、target host reload smoke
+- 设计源血缘：`design_refs`、S1/S2/S3 设计源、acceptance tests、traceability matrix 与 S5 结构校验
+- 需求逻辑访谈：S1 生成 `question-backlog.json`、`requirement-logic-map.json`，按七个 logic lenses 校验澄清深度
+- 节点循环策略：`nodes[*].loop_policy`、`node_loop_execution` capability、loop prompt package 与 loop evidence 校验
 
 它不是 ClaudeCode 版的兼容层，也不是从 Claude 版复制后简单替换路径的 adapter。这里的目标是维护一个 **OpenCode only** 的独立实现。
 
@@ -151,6 +154,8 @@ package agents 是 WorkflowProgram 随包安装到 `.opencode/agents/*.md` 的 O
 
 `/wp-develop` 默认是对话式入口。OpenCode 应先询问目标对象、交付物、工具边界、graph 形态、自迭代、目标 CLI command 和 OpenCode plugin hook 等问题，并在你确认设计回读后才执行 runtime 生成目标工作流；未确认时 runtime 只会返回阻塞问题，不会写入目标 `.workflowprogram/design/workflow-spec.yaml`。package agent 证据只能辅助设计，不能替代用户确认。
 
+S1 不是泛泛问“输入输出和边界”。OpenCode 版会按 `purpose`、`object_model`、`process_model`、`decision_model`、`evidence_model`、`acceptance_model`、`boundary_model` 七个 logic lenses 形成需求逻辑访谈证据。就绪的 develop run 会留下 `RUN_ROOT/outputs/clarification/question-backlog.json`、`RUN_ROOT/outputs/clarification/requirement-logic-map.json`，并镜像到 `RUN_ROOT/outputs/stages/` 供 S5 校验；只有泛问题或澄清轮次不足的 draft 会被 `validate-workflow-draft.py` 拦截。
+
 运行时会在 `RUN_ROOT/outputs/team-plan.json` 和 `RUN_ROOT/outputs/team-plan.md` 生成 agentteam 调度建议。这个文件只是调度指南，不代表 subagent 已经执行；只有 OpenCode 实际调用 `@workflow-designer` 等 agent 并留下响应或调度记录后，才能认为该 agent 参与了运行。`--ai-evidence` 仅保留为 legacy 诊断字段，不能作为设计已发生或可写入目标的验收证据。
 
 典型流程：
@@ -230,6 +235,7 @@ package agents 是 WorkflowProgram 随包安装到 `.opencode/agents/*.md` 的 O
 - agent role metadata 与 team-plan evidence
 - managed apply lock 与 rollback manifest
 - clean release package build
+- design lineage 与 node loop policy 契约
 
 本地验证过：
 
@@ -237,6 +243,7 @@ package agents 是 WorkflowProgram 随包安装到 `.opencode/agents/*.md` 的 O
 - source package validator
 - `install -> status -> develop -> validate -> uninstall`
 - `--create-venv` 下的 `PyYAML` 导入与 runtime 执行
+- develop 设计流回归，包括 `design_refs`、traceability、node loop evidence 和缺失 `node_loop_execution` 的失败用例
 
 当前仓库已经有真实 OpenCode 宿主的自动化集成 smoke，但它和 runtime smoke 的含义不同。runtime smoke 追求确定性闭环；host integration smoke 会真实调用 `opencode run --command ...`，因此在 provider/API 未就绪时允许返回 `ENVIRONMENT-SKIP`，而不是假装通过。
 当前已经补上四类 smoke：

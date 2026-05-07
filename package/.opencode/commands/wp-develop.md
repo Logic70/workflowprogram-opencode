@@ -14,7 +14,10 @@ Rules:
 - Default mode is interactive. If the user has not already answered clarification questions and confirmed the design readback, ask the questions first and stop; do not run the runtime yet.
 
 Interactive clarification gate:
-- For broad requests like "create a reverse engineering workflow", use a brainstorm -> constrain -> converge -> readback flow.
+- For broad requests like "create a reverse engineering workflow", use a requirement logic interview before runtime execution.
+- Cover these seven logic lenses before design readback: purpose, object_model, process_model, decision_model, evidence_model, acceptance_model, and boundary_model.
+- Questions must be design-consequential: different answers should change graph nodes, branch decisions, evidence requirements, acceptance scenarios, or stop boundaries.
+- Generic questions like "any other edge cases?" cannot be the primary evidence for a complex workflow.
 - Keep the first clarification round concise; group these decisions into at most five questions when possible:
   - target object and final deliverables
   - graph shape: sequence, branch, parallelism, fan-in/fan-out, manual checkpoints, and shared context
@@ -25,6 +28,7 @@ Interactive clarification gate:
 - Only after explicit confirmation, write the accepted design as `workflow-spec.md` and `workflow-spec.yaml`, then continue below and append `--confirmed` to the runtime command.
 - `$ARGUMENTS` containing `--confirmed` is not enough by itself; it is valid only when the accepted `workflow-spec.md` and `workflow-spec.yaml` also exist and the current turn clearly confirms writing and runtime execution.
 - Pre-runtime package agent evidence helps design the workflow, but it is not a substitute for user confirmation.
+- A valid develop run must produce requirement-logic evidence such as `question-backlog.json` and `requirement-logic-map.json` under RUN_ROOT outputs; shallow drafts can be rejected by deterministic validators.
 
 Optionally run the agentteam planner after the interactive gate:
 

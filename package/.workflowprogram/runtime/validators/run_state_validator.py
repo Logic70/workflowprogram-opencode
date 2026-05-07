@@ -14,7 +14,17 @@ RUNTIME_DIR = Path(__file__).resolve().parents[1]
 if str(RUNTIME_DIR) not in sys.path:
     sys.path.insert(0, str(RUNTIME_DIR))
 
-from runtime_common import FAILURE_KINDS, MUTATING_PACKAGE_INTENTS, SCHEMA_VERSION, read_json, read_jsonl, sha256_file  # noqa: E402
+from runtime_common import (  # noqa: E402
+    FAILURE_KINDS,
+    LOOP_EVENT_TYPES,
+    MUTATING_PACKAGE_INTENTS,
+    SCHEMA_VERSION,
+    node_loop_enabled_nodes,
+    read_json,
+    read_jsonl,
+    read_yaml,
+    sha256_file,
+)
 from error_codes import code_for, remediation_for  # noqa: E402
 
 
@@ -70,10 +80,13 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
     target_design_match_ok = True
     apply_recovery_ok = True
     schema_version_ok = True
+    design_lineage_ok = True
+    node_loop_evidence_ok = True
     if context_path.is_file() and state_path.is_file() and events_path.is_file():
         context = read_json(context_path)
         state = read_json(state_path)
         events = read_jsonl(events_path)
+        event_types = {str(event.get("type", "")).strip() for event in events if isinstance(event, dict)}
         intent = str(context.get("intent", "")).strip()
         schema_version_ok = state.get("schema_version") in {SCHEMA_VERSION, None}
         verdict_ok = state.get("verdict") in {"PASS", "WARN", "FAIL", "ENVIRONMENT-SKIP"}
@@ -124,6 +137,8 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
             clarification_files = {
                 "clarification_record": clarification_root / "clarification-record.json",
                 "open_questions": clarification_root / "open-questions.json",
+                "question_backlog": clarification_root / "question-backlog.json",
+                "requirement_logic_map": clarification_root / "requirement-logic-map.json",
                 "design_readiness_report": clarification_root / "design-readiness-report.json",
                 "clarification_challenge_report": clarification_root / "clarification-challenge-report.json",
                 "clarification_handoff": clarification_root / "clarification-handoff.json",
@@ -134,20 +149,54 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
             if clarification_ok:
                 clarification_record = read_json(clarification_files["clarification_record"])
                 open_questions = read_json(clarification_files["open_questions"])
+                question_backlog = read_json(clarification_files["question_backlog"])
+                requirement_logic_map = read_json(clarification_files["requirement_logic_map"])
                 design_readiness = read_json(clarification_files["design_readiness_report"])
                 challenge_report = read_json(clarification_files["clarification_challenge_report"])
                 handoff = read_json(clarification_files["clarification_handoff"])
                 evidence = read_json(clarification_files["clarification_evidence"])
                 assumption_log = clarification_files["assumption_log"].read_text(encoding="utf-8").strip()
+                logic_lenses = (
+                    requirement_logic_map.get("logic_lenses", {})
+                    if isinstance(requirement_logic_map.get("logic_lenses"), dict)
+                    else {}
+                )
                 clarification_content_ok = all(
                     (
                         clarification_record.get("intent") == "develop",
+                        clarification_record.get("lead_role") == "requirement-clarification-lead",
                         isinstance(open_questions.get("blocking"), list),
                         isinstance(open_questions.get("non_blocking"), list),
+                        open_questions.get("method") == "requirement-logic-interview",
+                        isinstance(question_backlog.get("items"), list),
+                        len(question_backlog.get("items", [])) >= 7,
+                        set(logic_lenses)
+                        >= {
+                            "purpose",
+                            "object_model",
+                            "process_model",
+                            "decision_model",
+                            "evidence_model",
+                            "acceptance_model",
+                            "boundary_model",
+                        },
                         isinstance(design_readiness.get("ready"), bool),
+                        design_readiness.get("requirement_logic_interview_ready") in {True, False},
                         isinstance(challenge_report.get("challenge_rounds"), int),
+                        challenge_report.get("challenge_rounds", 0) >= 1,
+                        all(
+                            role.get("direct_user_contact") is False
+                            for role in challenge_report.get("review_roles", [])
+                            if isinstance(role, dict)
+                        ),
                         isinstance(handoff.get("s3_inputs"), dict),
+                        isinstance(handoff.get("s2_inputs"), dict),
+                        bool(handoff.get("logic_map_path")),
+                        bool(handoff.get("question_backlog_path")),
                         not managed_result_path.is_file() or evidence.get("readback_confirmed") is True,
+                        not managed_result_path.is_file() or evidence.get("logic_map_ready") is True,
+                        not managed_result_path.is_file() or evidence.get("s2_handoff_ready") is True,
+                        not managed_result_path.is_file() or evidence.get("s3_handoff_ready") is True,
                         not managed_result_path.is_file()
                         or set(evidence.get("readback_required_items", []))
                         >= {
@@ -201,6 +250,31 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
                         for run_file, target_file in zip(run_design_files, target_design_files)
                     )
                 )
+                spec_path = resolved / "workflow-spec.yaml"
+                spec = read_yaml(spec_path) if spec_path.is_file() else {}
+                spec = spec if isinstance(spec, dict) else {}
+                design_refs = spec.get("design_refs", {}) if isinstance(spec.get("design_refs"), dict) else {}
+                if design_refs:
+                    declared_ref_paths = [
+                        str(value).strip()
+                        for key, value in design_refs.items()
+                        if key != "node_designs" and str(value).strip()
+                    ]
+                    node_designs = design_refs.get("node_designs", {})
+                    if isinstance(node_designs, dict):
+                        declared_ref_paths.extend(str(value).strip() for value in node_designs.values() if str(value).strip())
+                    design_lineage_ok = all((resolved / rel_path).is_file() for rel_path in declared_ref_paths)
+
+                loop_nodes = node_loop_enabled_nodes(spec)
+                if loop_nodes:
+                    node_loop_evidence_ok = set(LOOP_EVENT_TYPES).issubset(event_types)
+                    for node in loop_nodes:
+                        node_id = str(node.get("id", "")).strip()
+                        loop_root = resolved / "outputs" / "stages" / "loops" / node_id
+                        node_loop_evidence_ok = node_loop_evidence_ok and all(
+                            (loop_root / name).is_file()
+                            for name in ("loop-plan.json", "iteration-summary.jsonl", "final-verdict.json")
+                        )
 
     checks.append(_check("RUN-05", verdict_ok, "state.verdict must be valid", "state_invalid"))
     checks.append(
@@ -298,6 +372,22 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
             apply_recovery_ok,
             f"managed_result={managed_result_path}",
             "apply_recovery",
+        )
+    )
+    checks.append(
+        _check(
+            "RUN-15",
+            design_lineage_ok,
+            "declared design_refs must exist in RUN_ROOT evidence",
+            "evidence_missing",
+        )
+    )
+    checks.append(
+        _check(
+            "LOOP-01",
+            node_loop_evidence_ok,
+            "enabled node loops must emit structured evidence and loop events",
+            "evidence_missing",
         )
     )
 

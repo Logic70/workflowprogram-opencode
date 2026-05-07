@@ -161,7 +161,7 @@ def validate_target_bundle(target_root: Path) -> dict[str, Any]:
     actual_command_files = {
         path.relative_to(resolved).as_posix()
         for path in (resolved / ".opencode" / "commands").glob("*.md")
-        if path.is_file()
+        if path.is_file() and not path.stem.startswith(PACKAGE_COMMAND_PREFIX)
     }
     declared_plugin_files = {
         str(plugin.get("file", "")).replace("\\", "/")
@@ -171,7 +171,7 @@ def validate_target_bundle(target_root: Path) -> dict[str, Any]:
     actual_plugin_files = {
         path.relative_to(resolved).as_posix()
         for path in (resolved / ".opencode" / "plugins").glob("*.ts")
-        if path.is_file()
+        if path.is_file() and path.name != PACKAGE_PLUGIN_FILE
     }
     undeclared_opencode_assets = sorted(
         (actual_command_files - declared_command_files)

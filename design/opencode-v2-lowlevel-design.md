@@ -47,6 +47,9 @@
 | FR-29 | Global Bootstrap Installer | 提供全局轻量部署器，支持新项目一键 project-local 安装 |
 | FR-30 | User Package Cache | 提供用户级版本化 package cache，作为 bootstrap 安装源 |
 | FR-31 | Bootstrap Lifecycle Commands | 全局只暴露 install/status/upgrade/uninstall，不暴露完整产品生命周期命令 |
+| FR-32 | Design Source Lineage | 生成并校验 `design_refs`、S1/S2/S3 设计源、acceptance tests 与 traceability matrix |
+| FR-33 | Node Loop Policy | 支持 `nodes[*].loop_policy`、`node_loop_execution` capability、loop prompt package 与 loop evidence |
+| FR-34 | Requirement Logic Interview | develop S1 生成并校验七个 logic lenses、question backlog、requirement logic map、challenge/handoff/evidence |
 
 ## 特性分析
 ### 使用场景分析
@@ -69,6 +72,9 @@
 | UC-14 写入恢复 | apply 中断或冲突 | 并发、只读、用户改动 | 加锁、生成冲突说明、回滚或恢复 |
 | UC-15 离线与跨平台安装 | 无网络或 WSL/Windows 混用 | dependency lock、路径转换 | 使用锁定依赖、规范化路径、提示 reload |
 | UC-16 新项目全局引导安装 | 用户在新项目打开 OpenCode | install、status、upgrade、uninstall | 全局 bootstrap 从用户 cache 安装完整 project-local package |
+| UC-17 设计源血缘校验 | develop/hotfix/evolve 形成 accepted spec | 默认设计源、外部 accepted spec、node-design | 写入 `outputs/stages/*`，将 `design_refs` 写入 spec，S5 校验需求到 traceability 的结构链 |
+| UC-18 节点循环策略 | 复杂节点需要 bounded iteration | validation loop、TDD loop、model subgoal loop | 校验 loop policy、生成 prompt package、写 loop evidence、S5 检查 verifier gate |
+| UC-19 需求逻辑访谈 | develop 请求进入 S1 | broad request、accepted readback、shallow draft | 生成 question backlog、logic map、handoff evidence，拒绝泛问题草案 |
 
 ### 影响分析
 #### 依赖与技术限制
@@ -142,6 +148,8 @@ graph LR
 | F7 Evidence & Validation | 运行证据与分层校验 | 运行证据契约 |
 | F8 Global Bootstrap | 全局轻量部署入口 | 安装部署契约 |
 | F9 User Package Cache | 版本化 package 安装源 | 安装部署契约 |
+| F10 Design Lineage | 设计源与机器投影的可追踪链路 | 工作流语义契约 / 运行证据契约 |
+| F11 Node Loop Policy | 节点级循环策略与证据门禁 | 工作流语义契约 / 运行证据契约 |
 
 ### UC-01 产品包加载实现
 #### 设计思路
@@ -413,6 +421,10 @@ sequenceDiagram
 | C-16 | 所有错误必须映射到统一 error code，不能只输出自由文本 |
 | C-17 | 日志和证据默认不得泄露 API key、token、完整敏感环境变量 |
 | C-18 | 离线安装路径不得强依赖实时网络；网络依赖只能作为可选加速路径 |
+| C-19 | `design_refs` 只能指向 `RUN_ROOT/outputs/stages/**`，不得指向 `.claude/**`、package runtime 或 target 私有路径 |
+| C-20 | OpenCode 版使用 `nodes[*].loop_policy`，不得引入 Claude 专属 `workflow_graph.nodes[*]` 包装层 |
+| C-21 | loop feedback command 必须使用结构化 `argv`，不得接受 shell command 字符串 |
+| C-22 | loop PASS 必须由 verifier/test 证据支撑，模型自述或 `--ai-evidence` 不能作为 loop 成功条件 |
 
 ## 差距闭环实现设计
 
@@ -461,6 +473,9 @@ graph TB
 | GC-10 深度 validator | `validate-workflow-draft.py`、`validate-generated-runtime.py`、`validate-lessons-delta.py`、`generate-clarification-review.py` | deep validation summary |
 | GC-11 安装生命周期 | `package-deploy.py`、`requirements.lock.txt`、installer smoke | upgrade/uninstall/offline/path report |
 | GC-12 能力映射矩阵 | `design/opencode-v2-capability-parity-matrix.md` | parity status and traceability |
+| GC-13 设计源血缘契约 | `workflow-runner.py`、`workflow_spec_validator.py`、`workflow-s5-judge.py`、`run_state_validator.py` | `design_refs`、S1/S2/S3 artifacts、traceability S5 checks |
+| GC-14 需求逻辑访谈契约 | `workflow-runner.py`、`validate-workflow-draft.py`、`generate-clarification-package.py`、`generate-clarification-review.py`、`run_state_validator.py`、`workflow-s5-judge.py` | `question-backlog.json`、`requirement-logic-map.json`、S2/S3 handoff checks |
+| GC-15 节点循环策略契约 | `runtime_common.py`、`workflow-runner.py`、`workflow_spec_validator.py`、`workflow-s5-judge.py`、`managed_assets_lib.py` | `nodes[*].loop_policy`、loop prompt package、loop evidence |
 
 ### UC-08 产品生命周期编排实现
 
@@ -493,6 +508,8 @@ graph TB
 - `develop` 的默认入口先执行交互式澄清门：未确认请求必须先问 blocking questions、做设计回读并要求用户确认；确认后 runtime 使用 `--confirmed --draft <workflow-spec.md> --spec <workflow-spec.yaml>` 消费 accepted spec 并执行生成。`--ai-evidence` 只保留为 legacy 诊断字段，不能绕过确认门禁或替代 accepted spec。
 - 设计回读必须列出 graph nodes、edges、shared context、启用能力、未启用能力以及确认后将写入的文件；CLI command 与 plugin hook 必须分别确认，不能合并成一个触发选项。
 - 若模型跳过交互直接调用 runtime，runtime 也必须返回 clarification-only `WARN`，不得生成 target bundle。
+- S1 必须按七个 logic lenses 形成需求逻辑访谈证据：`purpose`、`object_model`、`process_model`、`decision_model`、`evidence_model`、`acceptance_model`、`boundary_model`。
+- runtime 写入 `outputs/clarification/question-backlog.json`、`outputs/clarification/requirement-logic-map.json`，并镜像到 `outputs/stages/`；`validate-workflow-draft.py` 拒绝缺少必备 S1 章节、澄清轮次不足或只有泛问题的 draft。
 - pre-runtime agent 结论如果改变设计，必须体现在 accepted `workflow-spec.yaml` 中；`--ai-evidence` 不作为后续验收或生成输入。
 - `workflow-designer` 负责设计，`workflow-validator` 负责契约校验，`workflow-verifier` 负责证据闭环，reviewer 负责专项审查，`test-scenario-generator` 负责场景覆盖。
 
@@ -617,6 +634,44 @@ sequenceDiagram
     BR-->>User: project-local install summary
 ```
 
+### UC-17 设计源血缘实现
+
+#### 设计思路
+
+- runtime 在 materialize accepted spec 或 template fallback 时写出 `RUN_ROOT/outputs/stages/*` 设计源文件。
+- `workflow-spec.yaml.design_refs` 使用 OpenCode 原生 top-level 字段，引用 `s1-requirements.yaml`、`s2-context-findings.yaml`、`s3-design-highlevel.md`、`s3-design-lowlevel.md`、`s3-implementation-plan.md`、`acceptance-tests.yaml` 和 `traceability-matrix.json`。
+- 复杂 node 或 loop node 可声明 `design_refs.node_designs.<node-id>`，路径必须在 `outputs/stages/node-designs/` 下。
+- `workflow_spec_validator.py` 只做 schema 与路径安全校验；`workflow-s5-judge.py` 负责检查文件存在、node id 投影和 requirement id 是否进入 traceability matrix。
+
+#### 实体关系分析
+
+| 实体 | 说明 |
+|---|---|
+| `DesignRefs` | `workflow-spec.yaml` 中的设计源引用映射 |
+| `RequirementIndex` | S1 需求索引，提供稳定 requirement id |
+| `TraceabilityMatrix` | requirement -> design node -> asset -> acceptance test -> evidence 的结构映射 |
+| `NodeDesign` | 复杂目标节点的局部设计源，不代表嵌套 WorkflowProgram 生命周期 |
+
+### UC-18 节点循环策略实现
+
+#### 设计思路
+
+- Claude 的 `workflow_graph.nodes[*].loop_policy` 在 OpenCode 中映射为 `nodes[*].loop_policy`，不新增 `workflow_graph` 包装层。
+- loop policy 必须声明 `enabled`、`mode`、`max_iterations`、`fresh_context_each_iteration`、`prompt_package`、`feedback_commands`、`stop_conditions` 和 `evidence_outputs`。
+- `feedback_commands` 只允许结构化 `argv`；禁止 shell command 字符串。
+- 任一 node 启用 loop 后，`generated_runtime_contract.runtime_capabilities` 必须包含 `node_loop_execution`。
+- target bundle generator 会写入 `.workflowprogram/loops/<node-id>/prompt-package.md`；managed apply 允许该前缀。
+- S5 检查 loop evidence：`loop-plan.json`、`iteration-summary.jsonl`、`final-verdict.json`、loop event types、iteration limit、verifier gate、model subgoal parent trace 和 TDD test-first marker。
+
+#### 实体关系分析
+
+| 实体 | 说明 |
+|---|---|
+| `NodeLoopPolicy` | 节点级 bounded iteration 合同 |
+| `LoopPromptPackage` | 目标 bundle 中的节点循环提示包 |
+| `LoopEvidence` | `RUN_ROOT/outputs/stages/loops/<node-id>/*` 结构化证据 |
+| `LoopEvents` | `events.jsonl` 中的 `LoopStart` 到 `LoopStop` 事件链 |
+
 ### 扩展 Story 划分
 
 | Story | 说明 | 依赖 |
@@ -642,3 +697,6 @@ sequenceDiagram
 | S29 | 补充 golden fixtures 与 CI 回归入口 | S19-S28 |
 | S30 | 建立 capability parity matrix 并接入 docs | S11-S29 |
 | S31 | 实现 global bootstrap installer、cache、bootstrap runtime 与 smoke 覆盖 | S21-S30 |
+| S32 | 实现 `design_refs`、设计源产物、traceability 与 S5 lineage checks | S5-S8 |
+| S33 | 实现 `nodes[*].loop_policy`、loop prompt package、runtime capability 和 loop evidence checks | S5-S8 |
+| S34 | 实现 S1 requirement logic interview、question backlog、logic map、draft/run-state/S5 checks | S3-S8 |

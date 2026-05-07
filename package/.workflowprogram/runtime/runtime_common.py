@@ -22,6 +22,21 @@ PACKAGE_COMMAND_PREFIX = "wp-"
 PACKAGE_PLUGIN_FILE = "workflowprogram.ts"
 PACKAGE_PLUGIN_ID = "workflowprogram-package-bridge"
 SCHEMA_VERSION = "opencode-v2.1"
+VALID_RUNTIME_CAPABILITIES = (
+    "state_transitions",
+    "run_state_validation",
+    "target_command_delivery",
+    "target_plugin_bridge",
+    "node_loop_execution",
+)
+LOOP_EVENT_TYPES = (
+    "LoopStart",
+    "LoopIterationStart",
+    "LoopFeedbackCommandCompleted",
+    "LoopAgentCompleted",
+    "LoopVerifierCompleted",
+    "LoopStop",
+)
 BOOTSTRAP_COMMANDS = ("wp-install", "wp-status", "wp-upgrade", "wp-uninstall")
 BOOTSTRAP_MANIFEST_PATH = ".workflowprogram/bootstrap/bootstrap-manifest.json"
 PRODUCT_INTENT_CONTRACT: dict[str, dict[str, Any]] = {
@@ -356,7 +371,34 @@ def derive_expected_target_files(spec: dict[str, Any]) -> list[str]:
     for path in MANDATORY_TARGET_FILES:
         if path not in required:
             required.append(path)
+    for path in node_loop_prompt_packages(spec):
+        if path not in required:
+            required.append(path)
     return required
+
+
+def node_loop_enabled_nodes(spec: dict[str, Any]) -> list[dict[str, Any]]:
+    nodes = spec.get("nodes", []) if isinstance(spec.get("nodes"), list) else []
+    enabled: list[dict[str, Any]] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        loop_policy = node.get("loop_policy", {})
+        if isinstance(loop_policy, dict) and loop_policy.get("enabled") is True:
+            enabled.append(node)
+    return enabled
+
+
+def node_loop_prompt_packages(spec: dict[str, Any]) -> list[str]:
+    prompts: list[str] = []
+    for node in node_loop_enabled_nodes(spec):
+        loop_policy = node.get("loop_policy", {})
+        if not isinstance(loop_policy, dict):
+            continue
+        prompt_package = str(loop_policy.get("prompt_package", "")).strip().replace("\\", "/")
+        if prompt_package and prompt_package not in prompts:
+            prompts.append(prompt_package)
+    return prompts
 
 
 def registry_commands(spec: dict[str, Any]) -> list[dict[str, Any]]:
