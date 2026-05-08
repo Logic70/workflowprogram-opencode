@@ -6,6 +6,7 @@ WorkflowProgram 的 OpenCode 独立版本。
 
 - `/wp-develop`：为当前项目生成目标工作流
 - `/wp-doctor`：诊断 package、Python、OpenCode CLI 和当前项目可用状态
+- `/wp-clean`：安全清理当前项目中的 Python cache、测试 cache 和可选历史 runs，不删除 workflow 设计或安装包
 - `/wp-preflight`：在不修改项目的情况下做运行前检查，适合在 hotfix、evolve、ship 或提交前确认环境、spec、目标产物和宿主加载没有明显阻塞
 - `/wp-hotfix`：对已有目标工作流做受控热修
 - `/wp-iterate`：基于用户反馈或前次运行上下文做小步增量调整，适合修正文案、阶段、命令参数或局部生成结果
@@ -128,6 +129,7 @@ python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py status --
 
 - `/wp-develop`
 - `/wp-doctor`
+- `/wp-clean`
 - `/wp-preflight`
 - `/wp-hotfix`
 - `/wp-iterate`
@@ -162,14 +164,25 @@ S1 不是泛泛问“输入输出和边界”。OpenCode 版会按 `purpose`、`
 
 1. 执行 `/wp-develop <你的需求>`，先回答澄清问题并确认设计回读，再让它生成目标工作流
 2. 需要先诊断环境时执行 `/wp-doctor`
-3. 在准备 hotfix、evolve、ship 或提交前，想先做不写文件的运行前检查时执行 `/wp-preflight`
-4. 对已有工作流做明确缺陷修复时执行 `/wp-hotfix`
-5. 对已有工作流做小步反馈迭代时执行 `/wp-iterate`
-6. 需要基于审计或 lessons 做较系统的版本化演进时执行 `/wp-evolve`
-7. 需要只读审计时执行 `/wp-audit`
-8. 不确定该用哪个入口时执行 `/wp-orchestrate`
-9. 准备提交或发布当前目标工作流前执行 `/wp-ship`
-10. 需要分层校验当前状态时执行 `/wp-validate`
+3. 需要清理本地缓存或历史 runs 时执行 `/wp-clean`；默认 dry-run，不会删除文件
+4. 在准备 hotfix、evolve、ship 或提交前，想先做不写文件的运行前检查时执行 `/wp-preflight`
+5. 对已有工作流做明确缺陷修复时执行 `/wp-hotfix`
+6. 对已有工作流做小步反馈迭代时执行 `/wp-iterate`
+7. 需要基于审计或 lessons 做较系统的版本化演进时执行 `/wp-evolve`
+8. 需要只读审计时执行 `/wp-audit`
+9. 不确定该用哪个入口时执行 `/wp-orchestrate`
+10. 准备提交或发布当前目标工作流前执行 `/wp-ship`
+11. 需要分层校验当前状态时执行 `/wp-validate`
+
+## 清理策略
+
+`/wp-clean` 用于当前项目维护，默认只生成清理计划和 `.workflowprogram/maintenance/clean-report.md`。只有显式传入 `--yes` 才删除。
+
+- 安全清理：`/wp-clean --pycache --yes` 或 `/wp-clean --all-safe --yes` 清理 `__pycache__`、`*.pyc`、`.pytest_cache`。
+- 历史 runs：`/wp-clean --runs --keep-last 20 --yes` 或 `/wp-clean --runs --older-than 30d --yes` 只清理符合策略的旧 run。
+- 需要确认：`--dist`、`--node-modules`、`--runs` 都不会默认执行删除。
+- 永久保护：`.workflowprogram/design/`、`.workflowprogram/package/`、`.workflowprogram/runtime/`、`.workflowprogram/managed-files.json`、install manifest、最新 run 和 running run。
+- bootstrap cache 清理不走 `/wp-clean`，使用 deploy 层：`package-deploy.py clean-bootstrap-cache --keep-last 2 --yes`。该命令会保护当前 bootstrap manifest 指向的 active cache。
 
 ## Doctor 常见结果
 
@@ -198,6 +211,7 @@ S1 不是泛泛问“输入输出和边界”。OpenCode 版会按 `purpose`、`
 │   ├── commands/
 │   │   ├── wp-develop.md
 │   │   ├── wp-doctor.md
+│   │   ├── wp-clean.md
 │   │   ├── wp-preflight.md
 │   │   ├── wp-hotfix.md
 │   │   ├── wp-iterate.md

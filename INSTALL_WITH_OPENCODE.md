@@ -115,6 +115,7 @@ python3 /mnt/d/Code/WorkflowProgram-CN/opencode-v2/package/.workflowprogram/runt
   - `.opencode/agents/style-reviewer.md`
   - `.opencode/agents/test-scenario-generator.md`
   - `.opencode/commands/wp-audit.md`
+  - `.opencode/commands/wp-clean.md`
   - `.opencode/commands/wp-develop.md`
   - `.opencode/commands/wp-doctor.md`
   - `.opencode/commands/wp-evolve.md`
@@ -133,7 +134,7 @@ python3 /mnt/d/Code/WorkflowProgram-CN/opencode-v2/package/.workflowprogram/runt
 安装成功后，告诉用户：
 
 - 重新打开当前项目的 OpenCode 会话，或者刷新命令列表
-- 然后检查 `/wp-develop`、`/wp-doctor`、`/wp-preflight`、`/wp-hotfix`、`/wp-iterate`、`/wp-audit`、`/wp-evolve`、`/wp-orchestrate`、`/wp-ship`、`/wp-validate` 是否出现
+- 然后检查 `/wp-develop`、`/wp-doctor`、`/wp-clean`、`/wp-preflight`、`/wp-hotfix`、`/wp-iterate`、`/wp-audit`、`/wp-evolve`、`/wp-orchestrate`、`/wp-ship`、`/wp-validate` 是否出现
 - 如需使用 package agents，可检查 `@workflow-designer`、`@workflow-validator`、`@workflow-verifier`、`@test-scenario-generator` 等是否可见
 - 如果 OpenCode 仍显示旧命令列表，重启 OpenCode 或重新打开当前项目
 - 如果使用的是全局 bootstrap，新项目第一次只会看到 `/wp-install` 等部署命令；完整 `/wp-develop` 等命令需要项目本地安装后刷新才会出现
@@ -188,3 +189,11 @@ python3 /mnt/d/Code/WorkflowProgram-CN/opencode-v2/package/.workflowprogram/runt
 
 - 如果用户明确要求锁定依赖，可在安装命令中追加 `--use-lock`
 - `--use-lock` 只在 `--create-venv` 时影响 Python 依赖安装
+
+### 需要清理缓存或历史 runs
+
+- 当前项目清理使用 `/wp-clean`，默认 dry-run
+- 删除 Python cache 可使用 `/wp-clean --pycache --yes`
+- 删除历史 runs 必须显式指定策略，例如 `/wp-clean --runs --keep-last 20 --yes`
+- 不要删除 `.workflowprogram/design`、`.workflowprogram/package`、`.workflowprogram/runtime`、`.workflowprogram/managed-files.json`
+- bootstrap cache 清理使用 `package-deploy.py clean-bootstrap-cache --keep-last 2 --yes`，不要手工删除 active cache

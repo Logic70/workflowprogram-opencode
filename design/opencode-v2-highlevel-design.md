@@ -68,8 +68,9 @@
 | AR-18 | 写入可恢复 | managed apply 必须支持冲突检测、并发锁、幂等性、回滚或可恢复失败 |
 | AR-19 | 运行可审计 | 权限、隐私脱敏、日志保留、错误分类必须可被 validator 和 doctor 统一解释 |
 | AR-20 | 平台边界明确 | WSL/Windows 路径、离线依赖、OpenCode 版本兼容和 plugin reload 规则必须显式记录 |
-| AR-20 | 能力差距可追踪 | ClaudeCode 到 OpenCode 的能力映射必须维护为设计资产，明确已实现、不适用、待规划和替代实现 |
-| AR-21 | 全局部署器轻量化 | 为改善新项目体验，可提供全局 bootstrap，但完整 WorkflowProgram 仍必须物化为 project-local 安装 |
+| AR-21 | 能力差距可追踪 | ClaudeCode 到 OpenCode 的能力映射必须维护为设计资产，明确已实现、不适用、待规划和替代实现 |
+| AR-22 | 全局部署器轻量化 | 为改善新项目体验，可提供全局 bootstrap，但完整 WorkflowProgram 仍必须物化为 project-local 安装 |
+| AR-23 | 维护清理安全可审计 | 清理 cache、runs 和 build 产物必须 dry-run 优先、保护 workflow/package 真源并留下 maintenance report |
 | AR-22 | AI 协作层显式化 | `/wp-*` 命令必须由 OpenCode host/model 完成设计与回读确认，Python runtime 只消费已接受的 `workflow-spec.yaml` 并负责确定性校验、生成和写入 |
 | AR-23 | 设计源血缘可验证 | `workflow-spec.yaml` 可通过 `design_refs` 引用 `RUN_ROOT/outputs/stages/*` 设计源，S5 必须检查需求到 traceability/evidence 的结构链路 |
 | AR-24 | 节点循环策略可验证 | 目标 graph node 可声明 `loop_policy`，但必须有边界、结构化 feedback command、runtime capability 与 loop evidence |
@@ -502,6 +503,7 @@ v1 采用 `source-as-deployment-source` 模式。
 | GC-13 | 设计源血缘契约 | 设计控制层 / 证据层 | 将 Claude `design_refs` 语义映射为 OpenCode top-level `design_refs` 与 S5 lineage checks | P1 |
 | GC-14 | 需求逻辑访谈契约 | 设计控制层 / 证据层 | 将 Claude S1 requirement logic interview 映射为 OpenCode clarification/stages 双路径证据，并由 draft、run-state、S5 校验 | P1 |
 | GC-15 | 节点循环策略契约 | 工作流语义层 / 证据层 | 将 Claude `workflow_graph.nodes[*].loop_policy` 映射为 OpenCode `nodes[*].loop_policy` 与 loop evidence checks | P1 |
+| GC-16 | 维护清理能力 | 产品包层 / 部署层 / OM层 | 新增 `/wp-clean` dry-run 项目清理和 `clean-bootstrap-cache` 版本化 cache prune，保护 design/package/active cache | P2 |
 
 ### 扩展上下文模型
 

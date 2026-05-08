@@ -15,3 +15,5 @@
 - S1 requirement logic interview evidence for OpenCode `develop`
 - `question-backlog.json` and `requirement-logic-map.json` generation and S5 validation
 - deterministic shallow draft rejection in `validate-workflow-draft.py`
+- `/wp-clean` project maintenance command with dry-run-first cache and run pruning
+- `package-deploy.py clean-bootstrap-cache` for versioned bootstrap cache pruning

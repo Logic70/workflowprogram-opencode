@@ -102,7 +102,7 @@ MUTATING_PACKAGE_INTENTS = tuple(
 READ_ONLY_PACKAGE_INTENTS = tuple(
     intent for intent, contract in PRODUCT_INTENT_CONTRACT.items() if not contract["mutating"]
 )
-PACKAGE_UTILITY_COMMANDS = ("wp-doctor",)
+PACKAGE_UTILITY_COMMANDS = ("wp-doctor", "wp-clean")
 REQUIRED_PACKAGE_COMMANDS = tuple(
     str(contract["command"]) for contract in PRODUCT_INTENT_CONTRACT.values()
 ) + (

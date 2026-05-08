@@ -20,6 +20,7 @@
 - [../openspec/changes/add-ai-collaboration-layer](../openspec/changes/add-ai-collaboration-layer)
 - [../openspec/changes/replicate-claude-latest-contracts](../openspec/changes/replicate-claude-latest-contracts)
 - [../openspec/changes/add-opencode-requirement-logic-interview](../openspec/changes/add-opencode-requirement-logic-interview)
+- [../openspec/changes/add-maintenance-cleaner](../openspec/changes/add-maintenance-cleaner)
 
 ## 文档分工
 
@@ -37,6 +38,7 @@
 | `../openspec/changes/add-ai-collaboration-layer` | 历史变更；host-dispatch 资产可保留，但语义上被 `align-opencode-design-flow-with-claude` 取代 |
 | `../openspec/changes/replicate-claude-latest-contracts` | 定义 Claude 最新设计源血缘和 node loop 契约到 OpenCode top-level `design_refs`、`nodes[*].loop_policy` 的映射 |
 | `../openspec/changes/add-opencode-requirement-logic-interview` | 定义 S1 需求逻辑访谈、七个 logic lenses、question backlog、requirement logic map 与 S5 handoff 校验 |
+| `../openspec/changes/add-maintenance-cleaner` | 定义 `/wp-clean` 项目清理、bootstrap cache prune、保护路径和 maintenance report |
 
 ## 跨版本输入
 
@@ -52,6 +54,7 @@
 - 新项目体验采用“全局轻量 bootstrap + 用户级 cache + project-local materialization”，不采用完整全局安装。
 - AI 协作由 OpenCode package agents 承担，Python runtime 负责确定性固化、校验和写入。
 - `/wp-develop` 的 S1 不是泛澄清；必须形成需求逻辑访谈证据，包括 `question-backlog.json`、`requirement-logic-map.json` 和 S2/S3 handoff。
+- `/wp-clean` 只做维护清理，不作为 workflow 执行证据；默认 dry-run，必须保护 workflow design、project-local package、managed manifest 和 active bootstrap cache。
 - 产品包命令与产品包插件属于 package contract。
 - 目标工作流的 commands / skills / agents / plugins 是否生成，属于 target bundle contract。
 - 后续能力补齐以 OpenSpec change 为实施真源，先按 capability 边界拆分，再进入具体代码实现。

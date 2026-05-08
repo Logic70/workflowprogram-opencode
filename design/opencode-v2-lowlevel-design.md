@@ -50,6 +50,7 @@
 | FR-32 | Design Source Lineage | 生成并校验 `design_refs`、S1/S2/S3 设计源、acceptance tests 与 traceability matrix |
 | FR-33 | Node Loop Policy | 支持 `nodes[*].loop_policy`、`node_loop_execution` capability、loop prompt package 与 loop evidence |
 | FR-34 | Requirement Logic Interview | develop S1 生成并校验七个 logic lenses、question backlog、requirement logic map、challenge/handoff/evidence |
+| FR-35 | Maintenance Cleaner | 提供 dry-run-first 项目清理与 bootstrap cache prune，保护 workflow/package 真源 |
 
 ## 特性分析
 ### 使用场景分析
@@ -75,6 +76,7 @@
 | UC-17 设计源血缘校验 | develop/hotfix/evolve 形成 accepted spec | 默认设计源、外部 accepted spec、node-design | 写入 `outputs/stages/*`，将 `design_refs` 写入 spec，S5 校验需求到 traceability 的结构链 |
 | UC-18 节点循环策略 | 复杂节点需要 bounded iteration | validation loop、TDD loop、model subgoal loop | 校验 loop policy、生成 prompt package、写 loop evidence、S5 检查 verifier gate |
 | UC-19 需求逻辑访谈 | develop 请求进入 S1 | broad request、accepted readback、shallow draft | 生成 question backlog、logic map、handoff evidence，拒绝泛问题草案 |
+| UC-20 维护清理 | 项目 cache 或历史 runs 增长 | dry-run、safe cache、runs prune、bootstrap cache prune | 生成 clean plan、保护真源、确认后删除、写 maintenance report |
 
 ### 影响分析
 #### 依赖与技术限制
@@ -476,6 +478,7 @@ graph TB
 | GC-13 设计源血缘契约 | `workflow-runner.py`、`workflow_spec_validator.py`、`workflow-s5-judge.py`、`run_state_validator.py` | `design_refs`、S1/S2/S3 artifacts、traceability S5 checks |
 | GC-14 需求逻辑访谈契约 | `workflow-runner.py`、`validate-workflow-draft.py`、`generate-clarification-package.py`、`generate-clarification-review.py`、`run_state_validator.py`、`workflow-s5-judge.py` | `question-backlog.json`、`requirement-logic-map.json`、S2/S3 handoff checks |
 | GC-15 节点循环策略契约 | `runtime_common.py`、`workflow-runner.py`、`workflow_spec_validator.py`、`workflow-s5-judge.py`、`managed_assets_lib.py` | `nodes[*].loop_policy`、loop prompt package、loop evidence |
+| GC-16 维护清理能力 | `cleaner.py`、`package/.opencode/commands/wp-clean.md`、`package-deploy.py` | clean plan、maintenance report、bootstrap cache prune report |
 
 ### UC-08 产品生命周期编排实现
 
@@ -700,3 +703,4 @@ sequenceDiagram
 | S32 | 实现 `design_refs`、设计源产物、traceability 与 S5 lineage checks | S5-S8 |
 | S33 | 实现 `nodes[*].loop_policy`、loop prompt package、runtime capability 和 loop evidence checks | S5-S8 |
 | S34 | 实现 S1 requirement logic interview、question backlog、logic map、draft/run-state/S5 checks | S3-S8 |
+| S35 | 实现 `/wp-clean`、`cleaner.py`、bootstrap cache prune 与 maintenance cleaner 回归 | S21-S31 |

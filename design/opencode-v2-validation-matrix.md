@@ -126,6 +126,10 @@
 | GBI-02 | bootstrap command 范围最小 | global `commands/` | 只能安装 `/wp-install`、`/wp-status`、`/wp-upgrade`、`/wp-uninstall` | bootstrap_isolation |
 | GBI-03 | cache package 可用 | user cache | cached package 必须包含 `package-deploy.py` 和完整 package layout | bootstrap_cache |
 | GBI-04 | bootstrap-driven project install | bootstrap runtime output | 必须复用 project-local install manifest，不得绕过 `package-deploy.py` | bootstrap_install |
+| CLN-01 | clean dry-run | `/wp-clean` / `cleaner.py` | 默认不得删除文件，必须输出 maintenance report | maintenance |
+| CLN-02 | protected path | `.workflowprogram/design`、package/runtime、manifest | 清理器不得删除 workflow/package 真源 | maintenance |
+| CLN-03 | run pruning | `.workflowprogram/runs/*` | 最新 run、running run 和未授权 failed run 必须保留 | maintenance |
+| CLN-04 | bootstrap cache prune | user cache packages | active cache version 必须保留 | bootstrap_cache |
 
 ## 8. 需求到校验追踪矩阵
 
@@ -151,6 +155,7 @@
 | AR-18 写入可恢复 | APP-01 |
 | AR-19 运行可审计 | ERR-01, SEC-01 |
 | AR-21 全局部署器轻量化 | GBI-01 ~ GBI-04, SMK-08 |
+| AR-23 维护清理安全可审计 | CLN-01 ~ CLN-04 |
 
 ## 9. 建议执行顺序
 

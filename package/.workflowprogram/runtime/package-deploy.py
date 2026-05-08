@@ -881,6 +881,82 @@ def uninstall_bootstrap(target_root: str | None, remove_cache: bool = False) -> 
     }
 
 
+def _cache_version_dirs(cache_root: Path) -> list[Path]:
+    packages_root = cache_root / "packages"
+    if not packages_root.is_dir():
+        return []
+    return sorted([path for path in packages_root.iterdir() if path.is_dir()], key=lambda path: path.stat().st_mtime, reverse=True)
+
+
+def clean_bootstrap_cache(
+    target_root: str | None,
+    cache_root: str | None,
+    keep_last: int | None,
+    remove_version: str | None,
+    yes: bool,
+) -> dict[str, Any]:
+    global_root = _resolve_install_root("global", target_root)
+    manifest_path = _bootstrap_manifest_path(global_root)
+    manifest: dict[str, Any] = {}
+    if manifest_path.is_file():
+        try:
+            manifest = read_json(manifest_path)
+        except Exception:
+            manifest = {}
+    selected_cache_root = Path(cache_root).resolve() if cache_root else (
+        Path(str(manifest.get("cache_root"))).resolve()
+        if isinstance(manifest.get("cache_root"), str)
+        else default_bootstrap_cache_root().resolve()
+    )
+    active_version_root: Path | None = None
+    if isinstance(manifest.get("cache_package_root"), str):
+        active_version_root = Path(manifest["cache_package_root"]).resolve().parent
+    version_dirs = _cache_version_dirs(selected_cache_root)
+    kept_by_count = set(version_dirs[: max(keep_last or 0, 0)]) if keep_last is not None else set()
+    candidates: list[dict[str, Any]] = []
+    for version_dir in version_dirs:
+        risk = "confirm"
+        reason = "versioned bootstrap package cache"
+        if active_version_root and version_dir.resolve() == active_version_root:
+            risk = "protected"
+            reason = "active cache version referenced by bootstrap manifest"
+        elif remove_version and version_dir.name != remove_version:
+            risk = "protected"
+            reason = f"not requested remove-version={remove_version}"
+        elif keep_last is not None and version_dir in kept_by_count:
+            risk = "protected"
+            reason = f"within keep-last={keep_last}"
+        candidates.append(
+            {
+                "version": version_dir.name,
+                "path": str(version_dir),
+                "risk": risk,
+                "reason": reason,
+            }
+        )
+    removed: list[str] = []
+    if yes:
+        for candidate in candidates:
+            if candidate["risk"] != "confirm":
+                continue
+            path = Path(candidate["path"])
+            if path.exists():
+                shutil.rmtree(path, ignore_errors=True)
+                removed.append(str(path))
+    return {
+        "action": "clean-bootstrap-cache",
+        "verdict": "PASS",
+        "summary": "Bootstrap cache clean plan generated." if not yes else "Bootstrap cache cleaned.",
+        "dry_run": not yes,
+        "global_root": str(global_root),
+        "cache_root": str(selected_cache_root),
+        "active_version_root": str(active_version_root) if active_version_root else None,
+        "candidates": candidates,
+        "removed": removed,
+        "exit_code": 0,
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Install or uninstall WorkflowProgram package layouts")
     parser.add_argument("--json", action="store_true")
@@ -930,6 +1006,14 @@ def build_parser() -> argparse.ArgumentParser:
     bootstrap_uninstall_parser.add_argument("--remove-cache", action="store_true")
     bootstrap_uninstall_parser.add_argument("--json", action="store_true")
 
+    cache_clean_parser = subparsers.add_parser("clean-bootstrap-cache", help="Prune old WorkflowProgram bootstrap cache versions")
+    cache_clean_parser.add_argument("--target-root", help="OpenCode global config root")
+    cache_clean_parser.add_argument("--cache-root", help="WorkflowProgram user cache root")
+    cache_clean_parser.add_argument("--keep-last", type=int, help="Keep the newest N cache versions")
+    cache_clean_parser.add_argument("--remove-version", help="Remove one specific cache version if it is not active")
+    cache_clean_parser.add_argument("--yes", action="store_true", help="Apply the cache cleanup plan")
+    cache_clean_parser.add_argument("--json", action="store_true")
+
     return parser
 
 
@@ -964,8 +1048,16 @@ def main() -> int:
         )
     elif args.action == "bootstrap-status":
         result = bootstrap_status(target_root=args.target_root)
-    else:
+    elif args.action == "uninstall-bootstrap":
         result = uninstall_bootstrap(target_root=args.target_root, remove_cache=args.remove_cache)
+    else:
+        result = clean_bootstrap_cache(
+            target_root=args.target_root,
+            cache_root=args.cache_root,
+            keep_last=args.keep_last,
+            remove_version=args.remove_version,
+            yes=args.yes,
+        )
 
     if args.json:
         json.dump(result, sys.stdout, indent=2, ensure_ascii=True)

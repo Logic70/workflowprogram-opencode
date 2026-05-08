@@ -24,6 +24,7 @@
 | 真实 OpenCode host smoke 分层 | package host integration smoke 和 target host reload smoke 分开；host/API 不可用或超时时返回 `ENVIRONMENT-SKIP`，不把宿主问题伪装成语义通过或失败 | `host-integration-smoke.py`、`target-host-smoke.py`、`runtime_host.py` |
 | 宿主隔离诊断 | doctor 显式检查全局 OpenCode 配置、Claude 资产、oh-my-opencode 资产、版本和 reload 风险 | `doctor.py`、host isolation validation |
 | 安装生命周期产品化 | 支持 status、upgrade、uninstall、offline lock、project-local venv、bootstrap status，便于本地项目长期维护 | `package-deploy.py`、`bootstrap-runtime.py`、install/status docs |
+| 维护清理产品化 | 项目 cache/runs 清理 dry-run 优先，bootstrap cache 可按版本 prune，保护 workflow/package 真源 | `/wp-clean`、`cleaner.py`、`package-deploy.py clean-bootstrap-cache` |
 | schema/error/privacy 契约 | spec、manifest、run-state、install manifest 具备 schema version；错误码和隐私脱敏形成跨 validator/runtime 的统一约束 | schema migration、error taxonomy、privacy redaction |
 | AI graph 设计的确定性落地 | stage/intentflow 的结构固定，但节点名称、顺序、分支、fan-in/out、准入准出、可选自迭代和 hook 由 AI/user 在 accepted spec 中定义 | `workflow-spec.md`、`workflow-spec.yaml`、graph validator |
 | 设计源血缘 | 保留 Claude 最新的 requirement -> design -> traceability -> evidence 结构校验，但使用 OpenCode `design_refs` 和 `RUN_ROOT/outputs/stages/*` | `workflow-runner.py`、`workflow_spec_validator.py`、`workflow-s5-judge.py` |
@@ -55,6 +56,7 @@
 | Target reload smoke | 目标工作流真实加载 | 已实现 | target host reload smoke；API 不可用时按 `ENVIRONMENT-SKIP` 分类，不伪造真实执行结果 | `opencode-target-host-verification` |
 | Build/release | Claude plugin/package metadata | 替代实现 | OpenCode release build from `package/` to clean artifact | `opencode-release-and-installation` |
 | 安装生命周期 | plugin install/runtime bootstrap | 已实现 | package deploy + venv + status/reinstall/lock regression | `opencode-release-and-installation` |
+| 维护清理 | cache/runs/build cleanup | 已实现 | `/wp-clean` 项目清理 + deploy 层 bootstrap cache prune | `add-maintenance-cleaner` |
 | 新项目安装体验 | 全局 skill/command 引导安装 | 已实现 | 全局轻量 `/wp-install` bootstrap + 用户级 cache + project-local materialization | `opencode-global-bootstrap-installer` |
 | Schema 演进 | 隐式脚本契约 | 已实现 | schema version + migration | `opencode-contract-hardening` |
 | 写入恢复 | managed generation | 已实现 | lock、idempotency、rollback/recover manifest | `opencode-contract-hardening` |
