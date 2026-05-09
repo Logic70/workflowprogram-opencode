@@ -226,7 +226,8 @@ def main() -> int:
                 "--target-root",
                 str(install_root),
                 "--user-arguments",
-                "smoke hotfix update --emit-target-command --emit-target-plugin",
+                "smoke hotfix update --emit-target-command --emit-target-plugin --confirmed",
+                "--confirmed",
                 "--json",
             ]
         )
@@ -240,7 +241,8 @@ def main() -> int:
                 "--target-root",
                 str(install_root),
                 "--user-arguments",
-                "smoke iterate update --emit-target-command --emit-target-plugin",
+                "smoke iterate update --emit-target-command --emit-target-plugin --confirmed",
+                "--confirmed",
                 "--json",
             ]
         )
@@ -268,7 +270,8 @@ def main() -> int:
                 "--target-root",
                 str(install_root),
                 "--user-arguments",
-                "smoke evolve update --emit-target-command --emit-target-plugin",
+                "smoke evolve update --emit-target-command --emit-target-plugin --confirmed",
+                "--confirmed",
                 "--json",
             ]
         )

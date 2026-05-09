@@ -4,6 +4,10 @@ description: Iterate an existing generated target workflow using prior run evide
 
 This is a WorkflowProgram package command.
 
+Entry strategy:
+- For natural-language requests where the right lifecycle step is unclear, prefer `/wp-orchestrate` first.
+- This direct command is an explicit expert entry for confirmed small-step improvement of an existing generated target workflow.
+
 Rules:
 - Treat the current working directory as `TARGET_ROOT`.
 - Only call scripts from `${WORKFLOWPROGRAM_RUNTIME_ROOT}/`.
@@ -11,6 +15,7 @@ Rules:
 - Iterate requires an existing generated target workflow.
 - Existing generated target workflow means `.workflowprogram/design/workflow-spec.yaml`, not `.workflowprogram/package/*`, `.workflowprogram/runtime/*`, or `.workflowprogram/runs/*` alone.
 - Use the host model/package agents to produce the accepted updated `workflow-spec.yaml`; Python validates and applies it.
+- Runtime enforces controlled change policy before managed apply; provide a concrete change request and accepted updated design.
 
 Optionally run the agentteam planner first:
 
@@ -23,7 +28,7 @@ Then dispatch `pre-runtime` agents if useful, or report `AI-DISPATCH-SKIPPED` if
 Run the runtime after the updated design is accepted:
 
 ```bash
-"${WORKFLOWPROGRAM_PYTHON}" "${WORKFLOWPROGRAM_RUNTIME_ROOT}/workflow-entry.py" iterate --package-root "${WORKFLOWPROGRAM_PACKAGE_ROOT}" --target-root "$PWD" --user-arguments "$ARGUMENTS" --draft "<path-to-workflow-spec.md>" --spec "<path-to-workflow-spec.yaml>"
+"${WORKFLOWPROGRAM_PYTHON}" "${WORKFLOWPROGRAM_RUNTIME_ROOT}/workflow-entry.py" iterate --package-root "${WORKFLOWPROGRAM_PACKAGE_ROOT}" --target-root "$PWD" --user-arguments "$ARGUMENTS" --confirmed --draft "<path-to-workflow-spec.md>" --spec "<path-to-workflow-spec.yaml>"
 ```
 
 Do not use `--ai-evidence` as proof that design happened; it is a deprecated diagnostic note only.

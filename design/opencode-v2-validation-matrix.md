@@ -47,6 +47,9 @@
 | PKG-11 | package 与 target 标识隔离 | 命令名、插件文件名、插件逻辑标识 | 不得与 target 命名策略冲突 | namespace_conflict |
 | PKG-12 | package agents 目录存在 | `project-local .opencode/agents/` 或 `global agents/` | 已安装 package 的 agents 目录必须存在 | package_structure |
 | PKG-13 | package agents 完整 | 已安装 agents 目录中的 `*.md` | v1 必需 agent 集必须齐全 | package_contract |
+| INT-02 | 入口暴露策略一致 | README 与 mutating command docs | `/wp-orchestrate` 必须被描述为自然语言推荐入口，直接 `/wp-*` 必须被描述为专家入口 | intent_contract |
+| CHG-01 | 受控变更命令文档一致 | `/wp-hotfix`、`/wp-iterate`、`/wp-evolve` | 既有工作流修改命令必须说明 controlled change policy 且 runtime invocation 带确认门禁 | intent_contract |
+| DOC-01 | README 入口与变更策略一致 | `README.md` | README 必须说明 natural-language entry、controlled change policy 和语义授权边界 | intent_contract |
 
 ## 4. Workflow Spec Validator 检查项
 
@@ -92,6 +95,10 @@
 | RUN-10 | diagnostics 内容合法 | diagnostics JSON/MD | diagnostics 必须包含最小字段集 | evidence_inconsistent |
 | RUN-11 | clarification 资产存在 | `outputs/clarification/*` | `develop` 运行必须落 clarification package | evidence_missing |
 | RUN-12 | clarification 内容合法 | clarification JSON/MD | clarification package 必须包含 record、questions、readiness、assumption log | evidence_inconsistent |
+| RUN-13 | 变更运行保留设计源 | `RUN_ROOT/workflow-spec.md`、`RUN_ROOT/workflow-spec.yaml` | mutating run 必须保留 accepted design artifact | evidence_missing |
+| RUN-14 | 目标设计与运行设计一致 | target design + RUN_ROOT design | target design artifact 必须与本次 accepted design hash 一致 | bundle_mismatch |
+| RUN-15 | 设计血缘证据存在 | `workflow-spec.yaml.design_refs` + `outputs/stages/*` | declared design refs 必须能在 RUN_ROOT 中找到 | evidence_missing |
+| CHG-01 | 受控变更证据通过 | `outputs/change-policy/*`、`outputs/stages/s3-change-policy.json` | hotfix/iterate/evolve 必须有 passing change-policy evidence | evidence_missing |
 
 ## 7. Smoke Harness 检查项
 
@@ -114,6 +121,10 @@
 | AGT-01 | package agent role schema 合法 | `.opencode/agents/*.md` | 必需 role 元数据存在且取值合法 | agent_contract |
 | AGT-02 | team plan 可解析 | `RUN_ROOT/outputs/team-plan.json` | 若存在则阶段、角色、输入、输出、fan-in 策略完整；不存在不阻断 core PASS | orchestration |
 | AGT-03 | legacy AI evidence 不作为成功门禁 | `context.json`、`state.json` | `--ai-evidence` 若存在只能作为 legacy 诊断字段，不能替代 `workflow-spec.md`、clarification handoff 或 accepted `workflow-spec.yaml` | orchestration |
+| CHG-02 | 变更请求具体 | `change-context.json` | existing-workflow mutation 必须包含非空且非命令占位的变更请求 | missing_change_request |
+| CHG-03 | base spec 未过期 | `change-context.json`、当前 target spec | `base_spec_sha256` 必须匹配当前 `.workflowprogram/design/workflow-spec.yaml` | stale_change_context |
+| CHG-04 | 候选文件落在声明范围 | candidate bundle + `declared_write_scope` | candidate relative paths 必须是安全相对路径且被声明写入范围覆盖 | undeclared_write |
+| CHG-05 | 既有工作流修改已确认 | command/runtime args + change context | hotfix/iterate/evolve 进入写入前必须显式 confirmed | unconfirmed_change |
 | HOST-01 | host source inventory 存在 | doctor diagnostics | 必须列出 project/global/known external asset sources | host_isolation |
 | HOST-02 | namespace shadowing 检测 | commands/agents/skills/plugins | 同名或覆盖风险必须报告来源路径 | namespace_shadowing |
 | REL-01 | release manifest 合法 | `dist/opencode/manifest.json` | 文件清单、checksum、excluded patterns 必须完整 | release_contract |
@@ -156,6 +167,8 @@
 | AR-19 运行可审计 | ERR-01, SEC-01 |
 | AR-21 全局部署器轻量化 | GBI-01 ~ GBI-04, SMK-08 |
 | AR-23 维护清理安全可审计 | CLN-01 ~ CLN-04 |
+| AR-25 变更语义授权可验证 | CHG-01 ~ CHG-05, RUN-13 ~ RUN-15 |
+| AR-26 用户入口暴露可收口 | INT-02, DOC-01 |
 
 ## 9. 建议执行顺序
 

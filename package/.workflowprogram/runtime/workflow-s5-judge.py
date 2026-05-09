@@ -362,6 +362,44 @@ def _add_requirement_logic_checks(checks: list[dict[str, Any]], run_root: Path, 
         )
 
 
+def _add_change_policy_checks(checks: list[dict[str, Any]], run_root: Path, state: dict[str, Any]) -> None:
+    intent = str(state.get("intent", "")).strip()
+    if intent not in {"hotfix", "iterate", "evolve"}:
+        return
+    context = _load_json(run_root / "outputs" / "change-policy" / "change-context.json")
+    summary = _load_json(run_root / "outputs" / "change-policy" / "change-policy-summary.json")
+    staged = _load_json(run_root / "outputs" / "stages" / "s3-change-policy.json")
+    artifacts_present = bool(context) and bool(summary) and bool(staged)
+    _add_check(
+        checks,
+        "change_policy_artifacts_exist",
+        "PASS" if artifacts_present else "FAIL",
+        f"context={bool(context)}; summary={bool(summary)}; staged={bool(staged)}",
+        "outputs/change-policy/*",
+    )
+    if not artifacts_present:
+        return
+    _add_check(
+        checks,
+        "change_policy_context_authorized",
+        "PASS"
+        if context.get("intent") == intent
+        and context.get("target_workflow_exists") is True
+        and context.get("confirmed") is True
+        and bool(context.get("change_request"))
+        else "FAIL",
+        f"intent={context.get('intent')}; exists={context.get('target_workflow_exists')}; confirmed={context.get('confirmed')}; request={context.get('change_request') or '<missing>'}",
+        "outputs/change-policy/change-context.json",
+    )
+    _add_check(
+        checks,
+        "change_policy_validation_passed",
+        "PASS" if summary.get("verdict") == "PASS" and staged.get("verdict") == "PASS" else "FAIL",
+        f"summary={summary.get('verdict')}; staged={staged.get('verdict')}; failures={summary.get('failure_categories', [])}",
+        "outputs/change-policy/change-policy-summary.json",
+    )
+
+
 def _failure_kind_from_layers(summary: dict[str, Any]) -> str | None:
     layers = summary.get("layers", {})
     for layer_name in ("package", "spec", "target", "run_state"):
@@ -390,6 +428,7 @@ def judge_run(run_root: Path, validation_summary: dict[str, Any] | None = None) 
     _add_design_lineage_checks(checks, spec, resolved)
     _add_loop_checks(checks, spec, resolved)
     _add_requirement_logic_checks(checks, resolved, state)
+    _add_change_policy_checks(checks, resolved, state)
     contract_failed = any(check["status"] == "FAIL" for check in checks)
     contract_warned = any(check["status"] == "WARN" for check in checks)
     if contract_failed:

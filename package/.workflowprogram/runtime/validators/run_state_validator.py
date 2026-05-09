@@ -51,6 +51,7 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
     clarification_root = resolved / "outputs" / "clarification"
     team_plan_path = resolved / "outputs" / "team-plan.json"
     managed_result_path = resolved / "outputs" / "managed-change-result.json"
+    change_policy_root = resolved / "outputs" / "change-policy"
 
     checks.append(_check("RUN-01", context_path.is_file(), f"context={context_path}", "evidence_missing"))
     checks.append(_check("RUN-02", state_path.is_file(), f"state={state_path}", "evidence_missing"))
@@ -82,6 +83,7 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
     schema_version_ok = True
     design_lineage_ok = True
     node_loop_evidence_ok = True
+    change_policy_ok = True
     if context_path.is_file() and state_path.is_file() and events_path.is_file():
         context = read_json(context_path)
         state = read_json(state_path)
@@ -222,6 +224,25 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
             )
 
         if intent in MUTATING_PACKAGE_INTENTS:
+            if intent in {"hotfix", "iterate", "evolve"}:
+                change_context_path = change_policy_root / "change-context.json"
+                change_summary_path = change_policy_root / "change-policy-summary.json"
+                staged_change_summary_path = stages_root / "s3-change-policy.json"
+                change_policy_ok = (
+                    change_context_path.is_file()
+                    and change_summary_path.is_file()
+                    and staged_change_summary_path.is_file()
+                )
+                if change_policy_ok:
+                    change_context = read_json(change_context_path)
+                    change_summary = read_json(change_summary_path)
+                    change_policy_ok = (
+                        change_context.get("intent") == intent
+                        and change_context.get("target_workflow_exists") is True
+                        and bool(change_context.get("change_request"))
+                        and change_context.get("confirmed") is True
+                        and change_summary.get("verdict") == "PASS"
+                    )
             apply_recovery_ok = False
             if managed_result_path.is_file():
                 managed_result = read_json(managed_result_path)
@@ -387,6 +408,14 @@ def validate_run_state(run_root: Path) -> dict[str, Any]:
             "LOOP-01",
             node_loop_evidence_ok,
             "enabled node loops must emit structured evidence and loop events",
+            "evidence_missing",
+        )
+    )
+    checks.append(
+        _check(
+            "CHG-01",
+            change_policy_ok,
+            "existing-workflow mutation intents must emit passing controlled change-policy evidence",
             "evidence_missing",
         )
     )

@@ -74,6 +74,8 @@
 | AR-22 | AI 协作层显式化 | `/wp-*` 命令必须由 OpenCode host/model 完成设计与回读确认，Python runtime 只消费已接受的 `workflow-spec.yaml` 并负责确定性校验、生成和写入 |
 | AR-23 | 设计源血缘可验证 | `workflow-spec.yaml` 可通过 `design_refs` 引用 `RUN_ROOT/outputs/stages/*` 设计源，S5 必须检查需求到 traceability/evidence 的结构链路 |
 | AR-24 | 节点循环策略可验证 | 目标 graph node 可声明 `loop_policy`，但必须有边界、结构化 feedback command、runtime capability 与 loop evidence |
+| AR-25 | 变更语义授权可验证 | 对已有目标工作流的 hotfix/iterate/evolve 必须在 managed apply 前通过 controlled change policy，验证变更请求、确认状态、base spec hash 和声明写入范围 |
+| AR-26 | 用户入口暴露可收口 | `/wp-orchestrate` 是自然语言推荐入口；直接 `/wp-*` 保留为专家入口，文档和 package validator 必须防止入口语义漂移 |
 
 ### 架构级原则与约束
 
@@ -95,6 +97,8 @@
 - package runtime 的 Python 依赖必须显式声明；v1 通过 `requirements.txt` 声明，并允许安装器创建 `.workflowprogram/package/.venv` 作为专用解释器。
 - package command 可以通过 `agent-team-planner.py` 或 `team-plan` 获取可选 agent 调度建议；planner 输出不是 mutation 成功条件。
 - `/wp-develop` 默认必须先完成交互式澄清、设计回读确认并形成 `workflow-spec.md` / `workflow-spec.yaml`；未确认请求或缺少 accepted spec 时只能产出 blocking questions/WARN，不得直接生成 target bundle。`--ai-evidence` 仅是 legacy 诊断字段，不能替代 accepted spec 或用户确认。
+- 自然语言工作流请求默认推荐先进入 `/wp-orchestrate`；直接 `/wp-develop`、`/wp-hotfix`、`/wp-iterate`、`/wp-evolve` 是显式专家入口，不应由模型仅凭 `.workflowprogram` 目录自行选择。
+- `/wp-hotfix`、`/wp-iterate`、`/wp-evolve` 必须先生成并验证 `RUN_ROOT/outputs/change-policy/change-context.json`，再进入 candidate apply；该策略是语义授权门禁，不替代 managed apply 的文件冲突检查。
 - `workflow-spec.yaml.design_refs` 只引用设计源证据路径，不嵌入完整设计推理；路径必须位于 `RUN_ROOT/outputs/stages/**`，target spec 不得借此访问 package 或宿主私有路径。
 - `nodes[*].loop_policy` 只描述目标 graph node 的 bounded iteration，不改变 WorkflowProgram 产品自身生命周期，也不代表 Python runtime 直接调用 OpenCode subagent。
 - 当任一 node 启用 `loop_policy.enabled=true`，`generated_runtime_contract.runtime_capabilities` 必须包含 `node_loop_execution`，且 S5 必须看到 loop-plan、iteration-summary、final-verdict 与 loop events。

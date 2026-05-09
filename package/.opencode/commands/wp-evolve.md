@@ -4,6 +4,10 @@ description: Evolve an existing generated target workflow through managed apply
 
 This is a WorkflowProgram package command.
 
+Entry strategy:
+- For natural-language requests where the right lifecycle step is unclear, prefer `/wp-orchestrate` first.
+- This direct command is an explicit expert entry for confirmed structural evolution of an existing generated target workflow.
+
 Rules:
 - Treat the current working directory as `TARGET_ROOT`.
 - Only call scripts from `${WORKFLOWPROGRAM_RUNTIME_ROOT}/`.
@@ -13,6 +17,7 @@ Rules:
 - Do not write target assets directly from the command body.
 - Use the host model/package agents to produce the accepted updated `workflow-spec.yaml`; Python validates and applies it.
 - Treat latest prior lessons as design context when present, but do not let lessons automatically rewrite `workflow-spec.yaml`.
+- Runtime enforces controlled change policy before managed apply; provide a concrete change request and accepted updated design.
 
 Optionally run the agentteam planner first:
 
@@ -25,7 +30,7 @@ Then dispatch `pre-runtime` agents if useful, or report `AI-DISPATCH-SKIPPED` if
 Run the runtime after the updated design is accepted:
 
 ```bash
-"${WORKFLOWPROGRAM_PYTHON}" "${WORKFLOWPROGRAM_RUNTIME_ROOT}/workflow-entry.py" evolve --package-root "${WORKFLOWPROGRAM_PACKAGE_ROOT}" --target-root "$PWD" --user-arguments "$ARGUMENTS" --draft "<path-to-workflow-spec.md>" --spec "<path-to-workflow-spec.yaml>"
+"${WORKFLOWPROGRAM_PYTHON}" "${WORKFLOWPROGRAM_RUNTIME_ROOT}/workflow-entry.py" evolve --package-root "${WORKFLOWPROGRAM_PACKAGE_ROOT}" --target-root "$PWD" --user-arguments "$ARGUMENTS" --confirmed --draft "<path-to-workflow-spec.md>" --spec "<path-to-workflow-spec.yaml>"
 ```
 
 Do not use `--ai-evidence` as proof that design happened; it is a deprecated diagnostic note only.

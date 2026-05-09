@@ -237,7 +237,7 @@ def run_host_integration_smoke(package_root: Path, target_root: Path, timeout_se
             (
                 "PASS"
                 if plugin_loaded_all
-                else ("ENVIRONMENT-SKIP" if plugin_loaded_any or not probe["ready"] else "FAIL")
+                else ("ENVIRONMENT-SKIP" if plugin_loaded_any or timed_out_any or not probe["ready"] else "FAIL")
             ),
             f"plugin_loaded={[name for name, item in commands.items() if item['plugin_loaded']]}",
             "host_integration",

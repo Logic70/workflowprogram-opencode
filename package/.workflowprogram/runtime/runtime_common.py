@@ -16,7 +16,7 @@ from typing import Any
 import yaml
 
 
-FAILURE_KINDS = ("none", "design", "implementation", "environment", "conflict")
+FAILURE_KINDS = ("none", "design", "implementation", "environment", "conflict", "policy")
 VALID_COMPLEXITY = {"S", "M", "L", "XL"}
 PACKAGE_COMMAND_PREFIX = "wp-"
 PACKAGE_PLUGIN_FILE = "workflowprogram.ts"

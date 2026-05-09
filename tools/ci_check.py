@@ -22,6 +22,8 @@ def main() -> int:
     commands = [
         ["python3", "-m", "py_compile", *[str(path) for path in sorted((root / "package" / ".workflowprogram" / "runtime").glob("*.py"))], *[str(path) for path in sorted((root / "package" / ".workflowprogram" / "runtime" / "validators").glob("*.py"))], "tools/build_package.py", "tools/ci_check.py"],
         ["python3", "package/.workflowprogram/runtime/validators/package_contract_validator.py", "--package-root", "package", "--json"],
+        ["python3", "tests/test_design_flow_runtime.py"],
+        ["python3", "tests/test_change_policy.py"],
         ["python3", "tools/build_package.py", "--source-package-root", "package", "--output-root", "/tmp/workflowprogram-opencode-ci-dist", "--clean", "--json"],
         ["python3", "/tmp/workflowprogram-opencode-ci-dist/.workflowprogram/runtime/validators/package_contract_validator.py", "--package-root", "/tmp/workflowprogram-opencode-ci-dist", "--json"],
     ]

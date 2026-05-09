@@ -23,6 +23,7 @@ WorkflowProgram 的 OpenCode 独立版本。
 - 设计源血缘：`design_refs`、S1/S2/S3 设计源、acceptance tests、traceability matrix 与 S5 结构校验
 - 需求逻辑访谈：S1 生成 `question-backlog.json`、`requirement-logic-map.json`，按七个 logic lenses 校验澄清深度
 - 节点循环策略：`nodes[*].loop_policy`、`node_loop_execution` capability、loop prompt package 与 loop evidence 校验
+- controlled change policy：`/wp-evolve`、`/wp-iterate`、`/wp-hotfix` 在写入前校验变更请求、确认状态、base spec hash 和声明写入范围
 
 它不是 ClaudeCode 版的兼容层，也不是从 Claude 版复制后简单替换路径的 adapter。这里的目标是维护一个 **OpenCode only** 的独立实现。
 
@@ -152,7 +153,11 @@ python3 <repo-root>/package/.workflowprogram/runtime/package-deploy.py status --
 
 package agents 是 WorkflowProgram 随包安装到 `.opencode/agents/*.md` 的 OpenCode 角色定义。它们用于设计、校验、验证和专项评审，可以被 WorkflowProgram 的编排逻辑引用，也可以由用户按 OpenCode 的方式显式 `@` 调用。它们不是 agentteam 本身；agentteam 是运行时生成的团队计划和阶段职责，package agent 是其中可被调用的单个执行角色。
 
+推荐入口策略：natural-language workflow request 先使用 `/wp-orchestrate`，由它判断应该 develop、validate、preflight、hotfix、iterate、ship、audit 还是 evolve。直接执行 `/wp-develop`、`/wp-evolve`、`/wp-hotfix`、`/wp-iterate` 属于显式专家入口，适合你已经明确生命周期阶段、已有接受设计、并准备让 runtime 进入校验和写入链路的场景。
+
 `/wp-develop`、`/wp-evolve`、`/wp-hotfix`、`/wp-iterate` 的正常路径是 OpenCode host/model 先完成设计回读，形成 `workflow-spec.md` 和已接受的 `workflow-spec.yaml`；Python runtime 只负责读取该 spec、生成 target bundle、执行 managed apply 与验证。agentteam planner 只是可选调度建议，不是成功条件。
+
+对已有目标工作流的修改还会经过 controlled change policy。`/wp-evolve`、`/wp-iterate`、`/wp-hotfix` 会在 managed apply 前记录 `RUN_ROOT/outputs/change-policy/change-context.json` 和 `change-policy-summary.json`，校验具体变更请求、用户确认、当前 base spec hash、候选文件是否落在声明写入范围内。这个门禁解决的是“语义授权”，managed apply 继续负责真实文件冲突和回滚证据。
 
 `/wp-develop` 默认是对话式入口。OpenCode 应先询问目标对象、交付物、工具边界、graph 形态、自迭代、目标 CLI command 和 OpenCode plugin hook 等问题，并在你确认设计回读后才执行 runtime 生成目标工作流；未确认时 runtime 只会返回阻塞问题，不会写入目标 `.workflowprogram/design/workflow-spec.yaml`。package agent 证据只能辅助设计，不能替代用户确认。
 
@@ -250,6 +255,8 @@ S1 不是泛泛问“输入输出和边界”。OpenCode 版会按 `purpose`、`
 - managed apply lock 与 rollback manifest
 - clean release package build
 - design lineage 与 node loop policy 契约
+- controlled change policy：hotfix/iterate/evolve 在写入前校验变更请求、确认状态、base spec hash 和声明写入范围
+- entry exposure contract：`/wp-orchestrate` 是自然语言推荐入口，直接 `/wp-*` 是专家入口
 
 本地验证过：
 
@@ -258,6 +265,7 @@ S1 不是泛泛问“输入输出和边界”。OpenCode 版会按 `purpose`、`
 - `install -> status -> develop -> validate -> uninstall`
 - `--create-venv` 下的 `PyYAML` 导入与 runtime 执行
 - develop 设计流回归，包括 `design_refs`、traceability、node loop evidence 和缺失 `node_loop_execution` 的失败用例
+- change-policy 回归，包括空变更请求、过期 base spec、未声明写入范围、合法 evolve 和入口暴露文档检查
 
 当前仓库已经有真实 OpenCode 宿主的自动化集成 smoke，但它和 runtime smoke 的含义不同。runtime smoke 追求确定性闭环；host integration smoke 会真实调用 `opencode run --command ...`，因此在 provider/API 未就绪时允许返回 `ENVIRONMENT-SKIP`，而不是假装通过。
 当前已经补上四类 smoke：

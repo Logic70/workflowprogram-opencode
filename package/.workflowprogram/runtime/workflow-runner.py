@@ -652,6 +652,42 @@ def _load_runtime_module(script_name: str, module_name: str):
     return module
 
 
+def _run_change_policy(
+    run: RunContext,
+    *,
+    intent: str,
+    user_arguments: str,
+    confirmed: bool,
+    candidate_root: Path,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    resolver = _load_runtime_module("resolve-change-context.py", "workflowprogram_resolve_change_context")
+    validator = _load_runtime_module("validate-change-policy.py", "workflowprogram_validate_change_policy")
+    context = resolver.resolve_change_context(
+        intent=intent,
+        target_root=Path(run.target.target_root),
+        run_root=Path(run.run_root),
+        user_arguments=user_arguments,
+        confirmed=confirmed,
+        candidate_root=candidate_root,
+    )
+    summary = validator.validate_change_policy(
+        context,
+        target_root=Path(run.target.target_root),
+        candidate_root=candidate_root,
+        run_root=Path(run.run_root),
+    )
+    _append_event(
+        run,
+        "ChangePolicyValidated",
+        "S3",
+        "ok" if summary["verdict"] == "PASS" else "fail",
+        "Change policy validation completed.",
+        change_policy_verdict=summary["verdict"],
+        failure_categories=summary.get("failure_categories", []),
+    )
+    return context, summary
+
+
 def _write_diagnostic_artifacts(run: RunContext, package_root: Path, target_root: Path) -> dict[str, str]:
     diagnostics_root = Path(run.run_root) / "outputs" / "diagnostics"
     ensure_dir(diagnostics_root)
@@ -2457,6 +2493,31 @@ def _run_mutation_intent(
         spec,
         draft_path.read_text(encoding="utf-8"),
     )
+    change_policy_summary: dict[str, Any] | None = None
+    if intent in {"hotfix", "iterate", "evolve"}:
+        _, change_policy_summary = _run_change_policy(
+            run,
+            intent=intent,
+            user_arguments=user_arguments,
+            confirmed=run.confirmed,
+            candidate_root=candidate_root,
+        )
+        if change_policy_summary["exit_code"] != 0:
+            _set_terminal_state(
+                run,
+                "FAIL",
+                "policy",
+                "Controlled change policy blocked target workflow mutation.",
+                change_policy=change_policy_summary,
+            )
+            return {
+                "intent": intent,
+                "verdict": "FAIL",
+                "summary": "Controlled change policy blocked target workflow mutation.",
+                "run_root": run.run_root,
+                "change_policy": change_policy_summary,
+                "exit_code": 3,
+            }
     plan, apply_result = apply_staged(
         target_root=Path(run.target.target_root),
         source_root=candidate_root,
@@ -2474,6 +2535,7 @@ def _run_mutation_intent(
             "candidate_root": str(candidate_root),
             "managed_status": apply_result["status"],
             "conflict_count": len(apply_result["conflicts"]),
+            "change_policy_verdict": change_policy_summary.get("verdict") if change_policy_summary else "not-applicable",
         },
     )
     if apply_result["conflicts"]:
@@ -2568,6 +2630,7 @@ def _run_mutation_intent(
         design_source_mode=design_source_mode,
         validation=validation_summary,
         judge=judge_summary,
+        change_policy=change_policy_summary,
     )
     summary_by_intent = {
         "develop": "Target workflow bundle generated and applied.",
@@ -2586,6 +2649,7 @@ def _run_mutation_intent(
         "spec_path": str(Path(run.target.design_root) / "workflow-spec.yaml"),
         "design_source_mode": design_source_mode,
         "managed_apply": apply_result,
+        "change_policy": change_policy_summary,
         "diagnostics": diagnostic_outputs,
         "team_plan": team_plan_outputs,
         "validation": validation_summary,

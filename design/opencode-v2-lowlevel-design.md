@@ -51,6 +51,8 @@
 | FR-33 | Node Loop Policy | 支持 `nodes[*].loop_policy`、`node_loop_execution` capability、loop prompt package 与 loop evidence |
 | FR-34 | Requirement Logic Interview | develop S1 生成并校验七个 logic lenses、question backlog、requirement logic map、challenge/handoff/evidence |
 | FR-35 | Maintenance Cleaner | 提供 dry-run-first 项目清理与 bootstrap cache prune，保护 workflow/package 真源 |
+| FR-36 | Controlled Change Policy | hotfix/iterate/evolve 在生成候选包后、managed apply 前校验变更上下文、base spec hash、用户确认和声明写入范围 |
+| FR-37 | Entry Exposure Contract | `/wp-orchestrate` 作为自然语言推荐入口；直接 `/wp-*` 作为专家入口并由 package validator 校验文档一致性 |
 
 ## 特性分析
 ### 使用场景分析
@@ -77,6 +79,8 @@
 | UC-18 节点循环策略 | 复杂节点需要 bounded iteration | validation loop、TDD loop、model subgoal loop | 校验 loop policy、生成 prompt package、写 loop evidence、S5 检查 verifier gate |
 | UC-19 需求逻辑访谈 | develop 请求进入 S1 | broad request、accepted readback、shallow draft | 生成 question backlog、logic map、handoff evidence，拒绝泛问题草案 |
 | UC-20 维护清理 | 项目 cache 或历史 runs 增长 | dry-run、safe cache、runs prune、bootstrap cache prune | 生成 clean plan、保护真源、确认后删除、写 maintenance report |
+| UC-21 受控修改已有工作流 | 用户明确 hotfix/iterate/evolve | 增量修复、小步迭代、结构演进 | 解析变更请求、计算 base spec hash、声明候选写入范围、校验 change policy、再执行 managed apply |
+| UC-22 自然语言入口分流 | 用户不确定该使用哪个生命周期命令 | 新建、校验、修复、迭代、发布 | 先运行 `/wp-orchestrate`，输出推荐入口和置信度，不自动执行 mutating intent |
 
 ### 影响分析
 #### 依赖与技术限制
@@ -152,6 +156,8 @@ graph LR
 | F9 User Package Cache | 版本化 package 安装源 | 安装部署契约 |
 | F10 Design Lineage | 设计源与机器投影的可追踪链路 | 工作流语义契约 / 运行证据契约 |
 | F11 Node Loop Policy | 节点级循环策略与证据门禁 | 工作流语义契约 / 运行证据契约 |
+| F12 Controlled Change Policy | 对已有目标工作流修改做语义授权和声明写入范围校验 | 运行证据契约 / 目标交付契约 |
+| F13 Entry Exposure Contract | 约束自然语言入口和专家命令文档一致性 | 产品包契约 |
 
 ### UC-01 产品包加载实现
 #### 设计思路

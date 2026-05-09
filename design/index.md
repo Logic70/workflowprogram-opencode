@@ -21,6 +21,7 @@
 - [../openspec/changes/replicate-claude-latest-contracts](../openspec/changes/replicate-claude-latest-contracts)
 - [../openspec/changes/add-opencode-requirement-logic-interview](../openspec/changes/add-opencode-requirement-logic-interview)
 - [../openspec/changes/add-maintenance-cleaner](../openspec/changes/add-maintenance-cleaner)
+- [../openspec/changes/add-controlled-change-and-entry-contract](../openspec/changes/add-controlled-change-and-entry-contract)
 
 ## 文档分工
 
@@ -39,6 +40,7 @@
 | `../openspec/changes/replicate-claude-latest-contracts` | 定义 Claude 最新设计源血缘和 node loop 契约到 OpenCode top-level `design_refs`、`nodes[*].loop_policy` 的映射 |
 | `../openspec/changes/add-opencode-requirement-logic-interview` | 定义 S1 需求逻辑访谈、七个 logic lenses、question backlog、requirement logic map 与 S5 handoff 校验 |
 | `../openspec/changes/add-maintenance-cleaner` | 定义 `/wp-clean` 项目清理、bootstrap cache prune、保护路径和 maintenance report |
+| `../openspec/changes/add-controlled-change-and-entry-contract` | 定义 hotfix/iterate/evolve 的 controlled change policy，以及 `/wp-orchestrate` 自然语言入口和直接 `/wp-*` 专家入口的暴露策略 |
 
 ## 跨版本输入
 
@@ -55,6 +57,8 @@
 - AI 协作由 OpenCode package agents 承担，Python runtime 负责确定性固化、校验和写入。
 - `/wp-develop` 的 S1 不是泛澄清；必须形成需求逻辑访谈证据，包括 `question-backlog.json`、`requirement-logic-map.json` 和 S2/S3 handoff。
 - `/wp-clean` 只做维护清理，不作为 workflow 执行证据；默认 dry-run，必须保护 workflow design、project-local package、managed manifest 和 active bootstrap cache。
+- `/wp-orchestrate` 是自然语言 workflow request 的推荐入口；直接 `/wp-develop`、`/wp-hotfix`、`/wp-iterate`、`/wp-evolve` 保留为显式专家入口。
+- `/wp-hotfix`、`/wp-iterate`、`/wp-evolve` 必须在 managed apply 前通过 controlled change policy；该策略校验变更请求、确认状态、base spec hash 和声明写入范围，不替代 managed apply 的文件冲突保护。
 - 产品包命令与产品包插件属于 package contract。
 - 目标工作流的 commands / skills / agents / plugins 是否生成，属于 target bundle contract。
 - 后续能力补齐以 OpenSpec change 为实施真源，先按 capability 边界拆分，再进入具体代码实现。

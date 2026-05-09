@@ -4,6 +4,10 @@ description: Design or update a target workflow with WorkflowProgram
 
 This is a WorkflowProgram package command.
 
+Entry strategy:
+- For natural-language requests where the right lifecycle step is unclear, prefer `/wp-orchestrate` first.
+- This direct command is an explicit expert entry for first-time workflow creation or intentional full design refresh.
+
 Rules:
 - Treat the current working directory as `TARGET_ROOT`.
 - Only call scripts from `${WORKFLOWPROGRAM_RUNTIME_ROOT}/`.

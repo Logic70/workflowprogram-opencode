@@ -42,6 +42,8 @@ REQUIRED_AGENT_METADATA = (
     "workflowprogram_priority",
     "workflowprogram_fan_in",
 )
+ENTRY_STRATEGY_COMMANDS = ("wp-develop", "wp-hotfix", "wp-iterate", "wp-evolve")
+CONTROLLED_CHANGE_COMMANDS = ("wp-hotfix", "wp-iterate", "wp-evolve")
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -274,6 +276,52 @@ def validate_package_contract(package_root: Path) -> dict[str, Any]:
             "intent_contract",
         )
     )
+
+    entry_strategy_missing: list[str] = []
+    controlled_change_missing: list[str] = []
+    for command_name in ENTRY_STRATEGY_COMMANDS:
+        command_path = commands_dir / f"{command_name}.md"
+        text = command_path.read_text(encoding="utf-8") if command_path.is_file() else ""
+        if "/wp-orchestrate" not in text or "explicit expert entry" not in text:
+            entry_strategy_missing.append(command_name)
+    for command_name in CONTROLLED_CHANGE_COMMANDS:
+        command_path = commands_dir / f"{command_name}.md"
+        text = command_path.read_text(encoding="utf-8") if command_path.is_file() else ""
+        if "controlled change policy" not in text or "--confirmed" not in text:
+            controlled_change_missing.append(command_name)
+    checks.append(
+        _build_check(
+            "INT-02",
+            not entry_strategy_missing,
+            f"missing_entry_strategy={entry_strategy_missing or ['<none>']}",
+            "intent_contract",
+        )
+    )
+    checks.append(
+        _build_check(
+            "CHG-01",
+            not controlled_change_missing,
+            f"missing_controlled_change_docs={controlled_change_missing or ['<none>']}",
+            "intent_contract",
+        )
+    )
+
+    repo_readme = root.parent / "README.md"
+    if repo_readme.is_file():
+        readme_text = repo_readme.read_text(encoding="utf-8")
+        readme_entry_ok = (
+            "/wp-orchestrate" in readme_text
+            and "natural-language" in readme_text
+            and "controlled change policy" in readme_text
+        )
+        checks.append(
+            _build_check(
+                "DOC-01",
+                readme_entry_ok,
+                f"readme={repo_readme}",
+                "intent_contract",
+            )
+        )
 
     failed = [item for item in checks if not item["passed"] and item["category"] != "none"]
     verdict = "PASS" if not failed else "FAIL"
